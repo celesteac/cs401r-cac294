@@ -10,3 +10,5 @@ __pycache__/
 .aws/
 .localstack/
 *.pptx
+# Lab 2 starter data (13 MB, regenerable from template repo)
+northstar-raw-sample.csv
