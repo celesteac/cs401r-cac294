@@ -63,8 +63,30 @@ def cast_types(df):
     key for every downstream feature, so a row without it cannot be
     attributed to anyone.
     """
-    # TODO: your implementation here
-    raise NotImplementedError("cast_types is not implemented")
+    # Return null (not raise) when a date does not match the pattern being
+    # tried, so the two-format coalesce below works.
+    df.sparkSession.conf.set("spark.sql.legacy.timeParserPolicy", "CORRECTED")
+
+    columns = []
+    for name, dtype in SCHEMA.items():
+        # The crawler typed some columns (order_value double, num_items
+        # bigint); go through string so every column gets the same trim and
+        # empty-string handling before its final cast.
+        trimmed = F.trim(F.col(name).cast("string"))
+        value = F.when(trimmed == "", F.lit(None)).otherwise(trimmed)
+
+        if name == "purchase_date":
+            value = F.coalesce(
+                F.to_date(value, "yyyy-MM-dd"),
+                F.to_date(value, "MM/dd/yyyy"),
+            )
+        else:
+            value = value.cast(dtype)
+
+        columns.append(value.alias(name))
+
+    # Selecting only SCHEMA columns pins the processed zone's Parquet schema.
+    return df.select(*columns).filter(F.col("customer_id").isNotNull())
 
 
 def impute_nulls(df):
@@ -79,8 +101,22 @@ def impute_nulls(df):
 
     Numeric columns: NUMERIC_COLS.  String columns: STRING_COLS.
     """
-    # TODO: your implementation here
-    raise NotImplementedError("impute_nulls is not implemented")
+    fills = {}
+    for name in NUMERIC_COLS:
+        # approxQuantile ignores nulls; it returns [] if the column is all null.
+        median = df.approxQuantile(name, [0.5], 0.0)
+        if not median:
+            continue
+        value = median[0]
+        if SCHEMA[name] == "int":
+            value = int(round(value))
+        fills[name] = value
+        print(f"[transform] impute {name} nulls with median {value}")
+
+    for name in STRING_COLS:
+        fills[name] = "unknown"
+
+    return df.fillna(fills)
 
 
 def deduplicate(df):
@@ -101,8 +137,22 @@ def deduplicate(df):
     A window function with row_number() over a partition by transaction_id
     is the idiomatic approach.
     """
-    # TODO: your implementation here
-    raise NotImplementedError("deduplicate is not implemented")
+    # Most recent purchase_date wins, then the larger order. The remaining
+    # columns only break exact ties, so the kept row never depends on
+    # partition order.
+    latest_first = Window.partitionBy("transaction_id").orderBy(
+        F.col("purchase_date").desc(),
+        F.col("order_value").desc(),
+        F.col("customer_id"),
+        F.col("num_items").desc(),
+        F.col("payment_method"),
+        F.col("channel"),
+        F.col("store_id"),
+        F.col("product_category"),
+    )
+    return (df.withColumn("_rank", F.row_number().over(latest_first))
+              .filter(F.col("_rank") == 1)
+              .drop("_rank"))
 
 
 def main():

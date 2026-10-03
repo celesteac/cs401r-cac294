@@ -25,3 +25,8 @@ output "security_group_id" {
   description = "ID of the default security group"
   value       = aws_security_group.this.id
 }
+
+output "glue_security_group_id" {
+  description = "ID of the self-referencing security group for Glue job workers"
+  value       = aws_security_group.glue.id
+}

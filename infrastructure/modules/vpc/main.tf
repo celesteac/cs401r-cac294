@@ -121,3 +121,31 @@ resource "aws_route_table_association" "private" {
   subnet_id      = aws_subnet.private.id
   route_table_id = aws_route_table.private.id
 }
+
+# ── Glue workers security group (Lab 2) ──────────────────────────────────────
+# Glue refuses a NETWORK connection unless an attached security group opens all
+# ingress ports to itself. A rule using the VPC CIDR as its source does not
+# satisfy the check - the source must be the group itself (self = true).
+resource "aws_security_group" "glue" {
+  name        = "${local.name_prefix}-glue-sg"
+  description = "Glue job workers: self-referencing all-ports ingress, unrestricted egress"
+  vpc_id      = aws_vpc.this.id
+
+  ingress {
+    description = "All traffic between Glue workers in this group"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    self        = true
+  }
+
+  egress {
+    description = "All outbound traffic (S3 and AWS APIs via the NAT Gateway)"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = { Name = "${local.name_prefix}-glue-sg" }
+}
