@@ -1,21 +1,36 @@
-# Uncomment once the matching module outputs exist. Mirrors environments/dev.
+# Mirrors environments/dev. `make local-validate` reads s3_bucket_name.
 
-# output "vpc_id" {
-#   description = "ID of the VPC"
-#   value       = module.vpc.vpc_id
-# }
+output "vpc_id" {
+  description = "ID of the VPC"
+  value       = module.vpc.vpc_id
+}
 
-# output "public_subnet_id" {
-#   description = "ID of the public subnet"
-#   value       = module.vpc.public_subnet_id
-# }
+output "public_subnet_id" {
+  description = "ID of the public subnet"
+  value       = module.vpc.public_subnet_id
+}
 
-# output "s3_bucket_name" {
-#   description = "Name of the data bucket"
-#   value       = module.storage.bucket_name
-# }
+output "private_subnet_id" {
+  description = "ID of the private subnet"
+  value       = module.vpc.private_subnet_id
+}
 
-# output "ml_engineer_role_arn" {
-#   description = "ARN of the MLEngineer role"
-#   value       = module.iam.ml_engineer_role_arn
-# }
+output "s3_bucket_name" {
+  description = "Name of the data bucket"
+  value       = module.storage.bucket_name
+}
+
+output "ml_engineer_role_arn" {
+  description = "ARN of the MLEngineer role"
+  value       = module.iam.ml_engineer_role_arn
+}
+
+output "data_engineer_role_arn" {
+  description = "ARN of the DataEngineer role"
+  value       = module.iam.data_engineer_role_arn
+}
+
+output "model_monitor_role_arn" {
+  description = "ARN of the ModelMonitor role"
+  value       = module.iam.model_monitor_role_arn
+}

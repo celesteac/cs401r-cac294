@@ -2,20 +2,22 @@
 # Calls the same modules as environments/dev. The sagemaker module is omitted
 # on purpose: SageMaker is not in LocalStack Community.
 #
-# These calls are live, not commented out, so `make local-validate` works the
-# moment your vpc, storage, and iam modules are implemented. Until then,
-# terraform validate still passes — an empty module is a valid module.
+# Lab 2: the NAT Gateway and the S3 lifecycle rules are switched off here, and
+# the iam module now creates all three roles (MLEngineer, DataEngineer,
+# ModelMonitor). `make local-validate` checks that no NAT Gateway was created.
 
 module "vpc" {
-  source      = "../../modules/vpc"
-  project     = var.project
-  environment = var.environment
+  source             = "../../modules/vpc"
+  project            = var.project
+  environment        = var.environment
+  enable_nat_gateway = false
 }
 
 module "storage" {
-  source      = "../../modules/storage"
-  project     = var.project
-  environment = var.environment
+  source                 = "../../modules/storage"
+  project                = var.project
+  environment            = var.environment
+  enable_lifecycle_rules = false
 }
 
 module "iam" {

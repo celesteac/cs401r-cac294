@@ -16,7 +16,7 @@ variable "vpc_id" {
 }
 
 variable "subnet_ids" {
-  description = "Subnets the SageMaker Domain may use"
+  description = "Subnets the SageMaker Domain may use (the private subnet from Lab 2 on)"
   type        = list(string)
 }
 

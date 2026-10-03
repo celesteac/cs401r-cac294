@@ -15,3 +15,9 @@ variable "prefixes" {
   type        = list(string)
   default     = ["raw/", "processed/", "features/", "artifacts/"]
 }
+
+variable "enable_lifecycle_rules" {
+  description = "Attach the S3 lifecycle configuration. Set false in environments/local (LocalStack)"
+  type        = bool
+  default     = true
+}

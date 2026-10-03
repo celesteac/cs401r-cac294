@@ -17,8 +17,10 @@ resource "aws_sagemaker_domain" "this" {
   vpc_id      = var.vpc_id
   subnet_ids  = var.subnet_ids
 
-  # Studio reaches the internet through the public subnet's Internet Gateway.
-  app_network_access_type = "PublicInternetOnly"
+  # Lab 2: the Domain lives in the private subnet and all Studio traffic stays
+  # in the VPC, leaving through the NAT Gateway rather than the Internet
+  # Gateway. Changing either this or subnet_ids forces Domain replacement.
+  app_network_access_type = "VpcOnly"
 
   default_user_settings {
     execution_role  = var.execution_role_arn
