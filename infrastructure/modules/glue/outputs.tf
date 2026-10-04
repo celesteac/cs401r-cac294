@@ -18,6 +18,11 @@ output "transform_job_name" {
   value       = aws_glue_job.transform.name
 }
 
+output "feature_engineer_job_name" {
+  description = "Name of the feature engineering ETL job"
+  value       = aws_glue_job.feature_engineer.name
+}
+
 output "connection_name" {
   description = "Glue NETWORK connection that places jobs in the private subnet"
   value       = aws_glue_connection.vpc.name

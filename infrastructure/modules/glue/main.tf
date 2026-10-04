@@ -1,12 +1,13 @@
 # ── modules/glue ─────────────────────────────────────────────────────────────
-# The ingestion half of the data pipeline:
+# The data pipeline:
 #
 #   s3 raw/<dataset>/ --crawler--> catalog table <dataset> --transform job-->
-#   s3 processed/<dataset>/ (Parquet)
+#   s3 processed/<dataset>/ (Parquet) --feature-engineer job-->
+#   s3 features/<dataset>/ (Parquet) + Feature Store PutRecord
 #
-# Everything runs as the DataEngineer role. The transform job runs inside the
-# private subnet through a NETWORK connection, so it reaches S3 and the Glue
-# APIs through the NAT Gateway.
+# Everything runs as the DataEngineer role. Both jobs run inside the private
+# subnet through a NETWORK connection, so they reach S3, the Glue APIs, and the
+# Feature Store runtime through the NAT Gateway.
 
 locals {
   name_prefix = "${var.project}-${var.environment}"
@@ -20,9 +21,12 @@ locals {
 
   raw_path        = "s3://${var.bucket_name}/raw/${var.dataset}/"
   processed_path  = "s3://${var.bucket_name}/processed/${var.dataset}/"
+  features_path   = "s3://${var.bucket_name}/features/${var.dataset}/"
   scripts_prefix  = "artifacts/glue"
   transform_key   = "${local.scripts_prefix}/transform.py"
   transform_s3uri = "s3://${var.bucket_name}/${local.transform_key}"
+  features_key    = "${local.scripts_prefix}/feature_engineer.py"
+  features_s3uri  = "s3://${var.bucket_name}/${local.features_key}"
 }
 
 resource "aws_glue_catalog_database" "this" {
@@ -99,4 +103,48 @@ resource "aws_glue_job" "transform" {
   depends_on = [aws_s3_object.transform_script]
 
   tags = { Name = "${local.name_prefix}-transform" }
+}
+
+# ── Feature engineering (Lab 2 Task 3) ───────────────────────────────────────
+
+resource "aws_s3_object" "feature_engineer_script" {
+  bucket = var.bucket_name
+  key    = local.features_key
+  source = var.feature_engineer_script_path
+  etag   = filemd5(var.feature_engineer_script_path)
+}
+
+resource "aws_glue_job" "feature_engineer" {
+  name         = "${local.name_prefix}-feature-engineer"
+  description  = "Splits ${var.dataset} history at the feature cutoff, computes one labelled feature row per customer, and ingests to Feature Store"
+  role_arn     = var.data_engineer_role_arn
+  glue_version = "4.0"
+  connections  = [aws_glue_connection.vpc.name]
+
+  worker_type       = var.worker_type
+  number_of_workers = var.number_of_workers
+  timeout           = var.job_timeout_minutes
+  max_retries       = 0
+
+  command {
+    name            = "glueetl"
+    python_version  = "3"
+    script_location = local.features_s3uri
+  }
+
+  # Read by getResolvedOptions in glue-scripts/feature_engineer.py. The job
+  # writes features/<dataset>/; the Feature Group's offline store has its own
+  # prefix, so the two writers never share a directory tree.
+  default_arguments = {
+    "--job-language"                     = "python"
+    "--enable-continuous-cloudwatch-log" = "true"
+    "--input_path"                       = local.processed_path
+    "--output_path"                      = local.features_path
+    "--feature_group_name"               = var.feature_group_name
+    "--region"                           = var.region
+  }
+
+  depends_on = [aws_s3_object.feature_engineer_script]
+
+  tags = { Name = "${local.name_prefix}-feature-engineer" }
 }

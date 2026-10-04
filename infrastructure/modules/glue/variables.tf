@@ -46,6 +46,21 @@ variable "transform_script_path" {
   type        = string
 }
 
+variable "feature_engineer_script_path" {
+  description = "Local path to glue-scripts/feature_engineer.py, uploaded to artifacts/glue/ on apply"
+  type        = string
+}
+
+variable "feature_group_name" {
+  description = "SageMaker Feature Group the feature engineering job ingests into"
+  type        = string
+}
+
+variable "region" {
+  description = "AWS region for the Feature Store runtime client in the feature engineering job"
+  type        = string
+}
+
 variable "worker_type" {
   description = "Glue worker type for the ETL jobs"
   type        = string
