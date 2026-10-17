@@ -325,27 +325,34 @@ def load_features_local(path: str) -> pd.DataFrame:
 
 # ── Feature Preprocessing ──────────────────────────────────────────────────────
 
-def preprocess_features(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+def preprocess_features(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, pd.Series | None]:
     """
     Clean and prepare features for XGBoost training.
-    Returns (X, y) arrays.
+    Returns (X, y, tiers). tiers is the loyalty_tier of each row, aligned with
+    X and y, or None if the data has no loyalty_tier column.
     """
     print(f"Preprocessing {len(df):,} samples...")
 
-    # Drop rows where label is missing
+    # Drop rows where label is missing. Done on df itself, so the tier column
+    # returned below stays row-aligned with X and y.
     df = df.dropna(subset=[LABEL_COLUMN])
 
-    # TODO: Handle missing values in features
-    # XGBoost can handle NaN natively, but document your imputation strategy.
-    # For features with business-meaningful nulls (e.g., clickstream for non-web customers),
-    # consider median imputation or a sentinel value.
-    X = df[FEATURE_COLUMNS].fillna(-1).values  # Sentinel -1 for missing
+    # Missing values are left as NaN rather than imputed. XGBoost treats NaN as
+    # "missing" and learns a default branch direction for it at every split,
+    # so missingness can carry signal without being confused with a real
+    # value. A -1 sentinel would collide with legitimate values on the ratio
+    # and score features, and median imputation would erase the missingness.
+    # astype(float) turns any None Athena returns into NaN.
+    X = df[FEATURE_COLUMNS].astype(float).values
     y = df[LABEL_COLUMN].values.astype(int)
+    tiers = df[SLICE_COLUMN].reset_index(drop=True) if SLICE_COLUMN in df.columns else None
 
+    n_missing = int(np.isnan(X).sum())
+    print(f"  Missing feature values (left as NaN): {n_missing:,}")
     print(f"  Positive class rate: {y.mean():.1%}")
     print(f"  Feature matrix shape: {X.shape}")
 
-    return X, y
+    return X, y, tiers
 
 
 # ── Model Training ─────────────────────────────────────────────────────────────
@@ -751,7 +758,7 @@ def main():
         )
 
     # 2. Preprocess
-    X, y = preprocess_features(df)
+    X, y, tiers = preprocess_features(df)
 
     # 3. Train/validation split (temporal split is better — split by customer_id here for simplicity)
     # test_size=0.30 matches the reference run and every published figure in
@@ -759,15 +766,19 @@ def main():
     # is calibrated on a test set that size; a 0.20 split leaves 2,000 rows and
     # widens the interval enough to matter.
     #
-    # TODO (Task 1): to run evaluate_slices() you need the tier for each
-    # validation row. Pass df[SLICE_COLUMN] as a third array to this same call
-    # and it is split on the identical indices:
-    #   X_train, X_val, y_train, y_val, tier_train, tier_val = train_test_split(
-    #       X, y, df[SLICE_COLUMN], test_size=0.30, random_state=42, stratify=y)
-    # Re-deriving the tiers afterwards from df will NOT line up.
-    X_train, X_val, y_train, y_val = train_test_split(
-        X, y, test_size=0.30, random_state=42, stratify=y
-    )
+    # The tiers are split in the same call as X and y, so each validation row
+    # keeps its own tier for evaluate_slices(). Re-deriving the tiers
+    # afterwards from df would NOT line up.
+    if tiers is not None:
+        X_train, X_val, y_train, y_val, tier_train, tier_val = train_test_split(
+            X, y, tiers, test_size=0.30, random_state=42, stratify=y
+        )
+        tier_val = tier_val.reset_index(drop=True)
+    else:
+        X_train, X_val, y_train, y_val = train_test_split(
+            X, y, test_size=0.30, random_state=42, stratify=y
+        )
+        tier_val = None
     print(f"\nTrain: {len(X_train):,} | Validation: {len(X_val):,}")
 
     # 4. Train
