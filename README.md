@@ -220,3 +220,47 @@ and finally checks the live API to confirm that nothing billable is left. It kee
 | [docs/lab2-data-contract.md](docs/lab2-data-contract.md) | Data contract for `processed/customers/` |
 | [docs/lab2-data-lineage.png](docs/lab2-data-lineage.png) | Lineage from source to Feature Store, with formats and IAM roles on each edge |
 | [docs/lab2/](docs/lab2/) | Editable `.drawio` sources for the architecture and lineage diagrams |
+
+## Lab 3 — Model Development (draft)
+
+_TODO: write this section before submitting. It must describe how to train, how to evaluate, and where artifacts land
+(Task 4, 1 point). Also update the lab table and repository layout at the top._
+
+### Notes (working notes — delete this subsection before submitting)
+
+**Prerequisites**
+- The Lab 2 platform must be up: `terraform apply` in `infrastructure/environments/dev`, then the data pipeline above.
+  Feature Group `northstar-dev-customer-features` should hold 9,999 records in its offline store.
+- Python packages: `pip install "sagemaker>=2.200.0,<3.0.0" xgboost scikit-learn pandas numpy matplotlib boto3 mlflow sagemaker-mlflow`.
+  sagemaker must be < 3.0 (3.x removed `sagemaker.feature_store`). `sagemaker-mlflow` is the SigV4 auth plugin for the App ARN.
+- MLflow **App** (not a Tracking Server), created once with `aws sagemaker create-mlflow-app`:
+  name `northstar-mlflow`, ARN `arn:aws:sagemaker:us-east-1:493155413162:mlflow-app/app-UA4K3MH52C63`,
+  artifact store `s3://<bucket>/artifacts/mlflow/`, role `northstar-dev-MLEngineer` (both from Terraform outputs).
+- Optional env vars: `MLFLOW_APP_ARN` (read by `--mlflow-arn`), `SAGEMAKER_SUPPRESS_V2_WARNING=1`.
+
+**Train**
+- `churn_training_skeleton.py` runs locally under your own AWS credentials (MLEngineer has no Athena permissions).
+- Arguments: `--feature-group-name`, `--artifacts-bucket` (from `terraform output`), `--mlflow-arn`, `--run-name`,
+  hyperparameters `--max-depth --eta --num-round --min-child-weight --subsample --colsample-bytree --scale-pos-weight`
+  (unset = computed from the training split), `--seed`, `--early-stopping-rounds`, `--min-slice-positives`,
+  `--model-dir`, `--output-data-dir`. `--local-data-path` exists for development only.
+- Graded run: `--output-data-dir docs/lab3-evidence 2>&1 | tee docs/lab3-evidence/train-final.log`.
+- The script forces UTF-8 stdout so `| tee` works on Windows.
+
+**Evaluate**
+- Gates (enforced by the script; failing a gate stops before registration): precision@10% ≥ 0.50,
+  recall@10% ≥ 0.25, 95% paired-bootstrap CI on the AUC lift over the recency-only baseline excludes 0. AUC is report-only.
+- Slice evaluation by `loyalty_tier`; tiers with fewer than 30 churners are flagged too small.
+- Track C: `python agent/policy_tests.py`, and `evaluation_harness.py` via `LocalAgentEvaluator` + `agent/harness_client.py`.
+
+**Where artifacts land**
+- `docs/lab3-evidence/`: `train-final.log`, `evaluation_metrics.json`, `slice-evaluation.csv`, `confusion-matrix.png`,
+  `feature-importance.png`, plus the exported AWS evidence from `scripts/collect-lab3-evidence.sh`.
+- `s3://<bucket>/artifacts/athena-results/`: Athena query results. `s3://<bucket>/artifacts/mlflow/`: MLflow artifacts.
+- `./model/`: local `model.xgb` + `model_metadata.json` (default `--model-dir`).
+- MLflow experiment `northstar-churn`; Model Registry group `northstar-churn-models` (`PendingManualApproval`).
+- Track C: `agent-traces.jsonl`, `agent-cost.csv`, `policy-tests.json` in `docs/lab3-evidence/`; harness output in `evaluation_results/`.
+
+**Windows**
+- Run the `.sh` scripts from Git Bash. `collect-lab3-evidence.sh` calls `python3`, which is the Microsoft Store stub here.
+  Fallback: `python scripts/collect_lab3_evidence.py --track C 2>&1 | tee docs/lab3-evidence/collect-output.txt`.

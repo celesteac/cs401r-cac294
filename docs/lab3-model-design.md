@@ -1,2 +1,116 @@
 task 3 - path c - agent
 
+# Lab 3 — Model Design
+
+**Track:** C — Customer Service Agent (Amazon Bedrock AgentCore)
+
+<!-- ~700 words across the four sections below, not counting the track line. -->
+
+## 1. Churn model
+
+_TODO: why gradient boosting over logistic regression or a neural network for this dataset; what would make me switch._
+
+## 2. What the features bought us
+
+_TODO: recency-only baseline vs full model with numbers and the CI; which features carried signal, which were decorative._
+
+## 3. LLM system
+
+_TODO: why an agent over a simpler pipeline; primary production risk; why the $50 cap is in three places and which one I'd trust alone._
+
+## 4. What I would do differently
+
+_TODO: a specific architectural or evaluation change with 10x time or data._
+
+---
+
+## Notes (working notes — delete this section before submitting)
+
+### Facts about the dataset (for section 1)
+
+- 9,999 customers, one labeled row each, in Feature Group `northstar-dev-customer-features`
+  (offline store table `sagemaker_featurestore.northstar_dev_customer_features_1792273222`). No duplicate records.
+- Churn rate 22.0% (2,200 positives). Split 70/30 stratified, seed 42: **6,999 train / 3,000 test** (660 test churners).
+- 13 features in the Feature Group; **11 used as model inputs**. Excluded: `churn_risk_score` (pure recency
+  heuristic, effectively the baseline) and `loyalty_tier` (slice column only; correlates with spend, so using it
+  would make the per-tier check circular). `churn_label` and `customer_id` are never inputs.
+- Tier mix (all 9,999): Silver 3,862 · Bronze 3,529 · Gold 1,664 · Platinum 944.
+- Tabular, mixed scales, skewed spend features -> trees need no scaling and handle interactions natively.
+- Small dataset for a neural net (7k training rows, 11 features).
+- Interpretability: gain-based feature importance is available directly from the booster (see section 2 notes).
+
+### Modeling choices made so far (for section 1)
+
+- XGBoost **3.4.1** locally (lab reference was 3.2.0; the SageMaker container is 1.7). Small metric differences vs the
+  reference are expected from the version alone.
+- `scale_pos_weight` = negatives / positives from the training split = **3.545** (not hardcoded; matches the reference).
+  Rebalances the loss so each class contributes equally.
+- Missing values left as **NaN** (not a -1 sentinel, not median imputation): XGBoost learns a default branch for
+  missing values at each split, so missingness can carry signal without colliding with real values. The current data
+  has 0 missing feature values, so this choice does not change today's metrics.
+- Early stopping on validation **AUC** (kept last in `eval_metric`), patience 20. The trial run stopped around round 30
+  of 200, i.e. the model is small; more rounds were not helping ranking.
+- Hyperparameters, seed and early-stopping patience are all CLI arguments (no literals in the training call).
+
+### Baseline vs full model (for section 2) — TRIAL RUN, replace with the graded run
+
+| | Value |
+|---|---|
+| Full model AUC | 0.7806 |
+| Recency-only baseline AUC | 0.7226 |
+| Lift | +0.058 |
+| 95% CI on lift (paired bootstrap, 2,000 reps) | [0.0383, 0.0774] — excludes 0 |
+| Precision @ top 10% | 0.7033 |
+| Recall @ top 10% | 0.3197 (ceiling ≈ 300 / 660 = 0.45) |
+
+Params: max_depth 6, eta 0.1, num_round 200, min_child_weight 5, subsample 0.8, colsample_bytree 0.8, seed 42.
+
+### Feature importance (for section 2) — TRIAL RUN
+
+Gain, highest first: days_since_last_purchase 58.7 · purchase_frequency_180d 56.6 · purchase_frequency_30d 22.2 ·
+avg_order_value 17.4 · purchase_frequency_90d 14.2 · total_lifetime_value 13.6 · avg_basket_size_6m 12.8 ·
+category_diversity_score 12.4 · total_spend_90d 11.2 · online_to_store_ratio 9.4 · customer_tenure_days 8.7
+
+- Recency still matters most, but **180-day frequency is nearly as strong**. Most of the lift over the recency
+  baseline likely comes from the frequency features.
+- The features the lab built to catch "still buying" churners (category diversity, channel mix, basket size) carry
+  **low gain**. That's a candidate for "decorative", and section 2 should be honest about it.
+- The three frequency windows (30/90/180d) overlap. Gain is split across correlated features, so a low score for one
+  does not prove it carries no signal. Worth saying.
+- Possible check before writing: drop the low-gain features and see whether AUC moves (would make the
+  "decorative" claim quantitative).
+
+### Slice finding worth using (sections 2 and 4)
+
+- The single top-10% contact list is dominated by **Bronze** customers: Bronze recall@10% is 0.43, but Gold 0.13 and
+  Silver 0.20, even though their within-tier AUCs (0.74, 0.71) are reasonable. A "contact the top 10% overall" budget
+  mostly reaches low-spend customers.
+- Idea for section 4: tier-aware or value-weighted contact budgets (e.g., rank by churn probability × lifetime value),
+  or a cost-based threshold from retention-offer economics.
+
+### LLM system — Track C (for section 3)
+
+- Bedrock **Agents** (`CreateAgent`) is closed to new accounts, so AgentCore is the only option (a constraint, not a preference).
+- Alternative to argue against: a fixed pipeline. Customer service needs branching, multi-step actions (look up
+  order -> check policy -> act or escalate), and the agent must decide when to clarify (TC-004) or escalate (TC-003, TC-005).
+- The $50 cap lives in three places:
+  - **System prompt.** Shapes behavior but can be talked around.
+  - **`tools.py`.** Code, but runs after the gateway has already allowed the call. Credits over $50 return
+    `approval_required=True` with a ticket instead of applying.
+  - **Gateway Cedar `forbid` policy.** Enforced by the platform **before** the tool runs, independent of the model.
+    `policy_tests.py` proves it with no model in the loop. This is the one to trust alone.
+- But even the gateway rule is **per-call**: two $40 credits pass (the split-credit hole). Link to `track-c-failures.md`.
+- Harness config from the kit: Haiku 4.5 via the `us.` inference profile, `max_iterations = 8`, `max_tokens = 1024`,
+  `memory { disabled {} }`, idle session timeout 60 s (runtime memory was 90% of the reference stack's bill at the
+  900 s default).
+- Production risk candidates: harmful action under customer pressure (TC-005: final-sale return for a long-tenure
+  Platinum member); stateful abuse (split credits).
+
+### Ideas for section 4 (10x time or data)
+
+- Time-based backtest (train at one cutoff `T`, test at a later one) instead of a random split. Rebuild features at
+  several cutoffs to get more labeled rows.
+- Calibrated probabilities + a cost-based threshold; value-weighted ranking (see the slice finding).
+- Per-customer SHAP explanations for the retention team.
+- Track C: a stateful credit ledger or temporal policy to close the split-credit hole; a larger adversarial scenario
+  suite run on every deploy.
