@@ -659,6 +659,63 @@ def evaluate_slices(model: xgb.Booster,
     return slices
 
 
+# ── Evaluation Plots ───────────────────────────────────────────────────────────
+
+def save_evaluation_plots(model: xgb.Booster,
+                          X_val: np.ndarray,
+                          y_val: np.ndarray,
+                          output_dir: str) -> None:
+    """Write confusion-matrix.png and feature-importance.png for this model.
+
+    The confusion matrix uses the top-10% cutoff, the same threshold as the
+    precision/recall gates: it is the decision the retention team would make
+    (contact the 10% highest-risk customers), not XGBoost's default 0.5.
+
+    Feature importance is by GAIN, the average loss reduction a feature's
+    splits deliver. The default (weight = split count) over-credits
+    continuous features that get split often for small gains.
+    """
+    import matplotlib
+    matplotlib.use("Agg")                 # file output only; no display needed
+    import matplotlib.pyplot as plt
+    from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix
+
+    y_pred_proba = model.predict(xgb.DMatrix(X_val, feature_names=FEATURE_COLUMNS))
+    threshold = np.percentile(y_pred_proba, 90)
+    y_pred = (y_pred_proba >= threshold).astype(int)
+
+    cm = confusion_matrix(y_val, y_pred, labels=[0, 1])
+    fig, ax = plt.subplots(figsize=(5.5, 4.5))
+    ConfusionMatrixDisplay(cm, display_labels=["Retained (0)", "Churned (1)"]).plot(
+        ax=ax, cmap="Blues", values_format="d", colorbar=False)
+    ax.set_title(f"Confusion matrix, top-10% cutoff (p >= {threshold:.3f})\n"
+                 f"test set n={len(y_val):,}")
+    fig.tight_layout()
+    fig.savefig(os.path.join(output_dir, "confusion-matrix.png"), dpi=150)
+    plt.close(fig)
+
+    gain = model.get_score(importance_type="gain")
+    # Features never used in a split are absent from get_score; show them as 0
+    # so a decorative feature is visible rather than silently missing.
+    importance = pd.Series({f: gain.get(f, 0.0) for f in FEATURE_COLUMNS}).sort_values()
+    fig, ax = plt.subplots(figsize=(7, 5))
+    ax.barh(importance.index, importance.values, color="#3b6ea5")
+    ax.set_xlabel("Average gain per split")
+    ax.set_title("Feature importance (gain)")
+    fig.tight_layout()
+    fig.savefig(os.path.join(output_dir, "feature-importance.png"), dpi=150)
+    plt.close(fig)
+
+    tn, fp, fn, tp = cm.ravel()
+    print(f"\n── Evaluation Plots ─────────────────────────────────")
+    print(f"  Confusion matrix at top-10% cutoff p >= {threshold:.4f}: "
+          f"TP={tp} FP={fp} FN={fn} TN={tn}")
+    print("  Feature importance (gain), highest first:")
+    for f, g in importance.sort_values(ascending=False).items():
+        print(f"    {f:28s} {g:8.2f}")
+    print(f"  Saved confusion-matrix.png and feature-importance.png to {output_dir}")
+
+
 # ── Experiment Tracking (MLflow App) ───────────────────────────────────────────
 
 def track_run(args, metrics: dict, scale_pos_weight: float) -> None:
@@ -843,6 +900,9 @@ def main():
         slices.to_csv(os.path.join(args.output_data_dir, "slice-evaluation.csv"), index=False)
     else:
         print(f"\nWARNING: no '{SLICE_COLUMN}' column - slice evaluation skipped")
+
+    # 5c. Confusion matrix and feature importance plots
+    save_evaluation_plots(model, X_val, y_val, args.output_data_dir)
 
     # 6. Save and register
     save_and_register_model(model, metrics, args)
