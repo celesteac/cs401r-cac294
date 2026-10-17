@@ -120,6 +120,9 @@ def parse_args():
                         help="Stop when validation AUC has not improved for this many rounds")
     parser.add_argument("--seed", type=int, default=42,
                         help="XGBoost random seed (row/column subsampling)")
+    parser.add_argument("--min-slice-positives", type=int, default=30,
+                        help="Slices with fewer churners than this are flagged too_small "
+                             "in the slice evaluation")
     parser.add_argument("--scale-pos-weight", type=float, default=None,
                         help=(
                             "XGBoost positive-class weight. Leave unset and it is computed "
@@ -588,37 +591,72 @@ def evaluate_model(model: xgb.Booster,
 
     print("  All thresholds passed ✓")
 
-    # TODO (Lab 3): Add slice evaluation
-    # Evaluate AUC and recall separately for each loyalty_tier and flag
-    # any segment where recall drops more than 10pp below aggregate recall.
+    # Slice evaluation lives in evaluate_slices(), called from main().
 
     return metrics
 
 
 # ── Slice Evaluation ───────────────────────────────────────────────────────────
 
+SLICE_RECALL_GAP = 0.10   # flag a slice whose recall is >10pp below aggregate
+
+
 def evaluate_slices(model: xgb.Booster,
                     X_val: np.ndarray,
                     y_val: np.ndarray,
-                    slice_column: pd.Series) -> dict:
+                    slice_column: pd.Series,
+                    min_positives: int) -> pd.DataFrame:
     """
     Evaluate model performance by slice (e.g., loyalty_tier, age_band).
     Flag slices where recall@10% drops more than 10pp below aggregate.
 
-    TODO: Implement this function in Lab 3.
+    Recall uses the SAME top-10% cutoff as the aggregate metric: the retention
+    team contacts the top 10% of all customers, not the top 10% of each tier,
+    so a slice's recall is the share of its churners that make that one list.
+
+    A slice is too_small when it has fewer than `min_positives` churners. Both
+    AUC and recall are computed over the positives, so their noise is set by
+    the positive count, not by n: at 30 positives the standard error of a
+    recall near 0.3 is about 0.08, the same size as the 10pp gap being
+    flagged. Below that, a slice difference cannot be told apart from noise.
     """
     dval = xgb.DMatrix(X_val, feature_names=FEATURE_COLUMNS)
     y_pred_proba = model.predict(dval)
-    aggregate_recall = None  # TODO: compute
+    top10_mask = y_pred_proba >= np.percentile(y_pred_proba, 90)
+    aggregate_recall = y_val[top10_mask].sum() / y_val.sum()
 
-    slice_results = {}
-    for slice_value in slice_column.unique():
+    rows = []
+    for slice_value in sorted(slice_column.unique()):
         mask = (slice_column == slice_value).values
-        # TODO: compute recall@10% for this slice
-        # Flag if recall < aggregate_recall - 0.10
-        pass
+        y_s, p_s, flagged = y_val[mask], y_pred_proba[mask], top10_mask[mask]
+        positives = int(y_s.sum())
+        # AUC is undefined for a single-class slice; report NaN, never a number.
+        auc_s = roc_auc_score(y_s, p_s) if 0 < positives < len(y_s) else np.nan
+        recall_s = y_s[flagged].sum() / positives if positives else np.nan
+        rows.append({
+            "tier": slice_value,
+            "n": int(mask.sum()),
+            "positives": positives,
+            "auc": round(float(auc_s), 4),
+            "recall_top10": round(float(recall_s), 4),
+            "recall_se": round(float(np.sqrt(recall_s * (1 - recall_s) / positives)), 4)
+                         if positives else np.nan,
+            "too_small": positives < min_positives,
+            "recall_below_aggregate": bool(recall_s < aggregate_recall - SLICE_RECALL_GAP),
+        })
+    slices = pd.DataFrame(rows)
 
-    return slice_results
+    print(f"\n── Slice Evaluation by {slice_column.name} "
+          f"(aggregate recall@10%: {aggregate_recall:.4f}) ──")
+    print(slices.to_string(index=False))
+    weakest = slices.loc[slices["auc"].idxmin()]
+    print(f"  Weakest tier by AUC: {weakest['tier']} "
+          f"(AUC {weakest['auc']:.4f}, n={weakest['n']}, positives={weakest['positives']})")
+    for _, r in slices[slices["too_small"]].iterrows():
+        print(f"  {r['tier']}: only {r['positives']} positives (< {min_positives}) "
+              f"- too small to conclude from")
+
+    return slices
 
 
 # ── Experiment Tracking (MLflow App) ───────────────────────────────────────────
@@ -798,6 +836,13 @@ def main():
     # 5. Evaluate
     baseline_proba = train_recency_baseline(X_train, y_train, X_val)
     metrics = evaluate_model(model, X_val, y_val, baseline_proba)
+
+    # 5b. Slice evaluation across loyalty tiers (Task 1, 5 pts)
+    if tier_val is not None:
+        slices = evaluate_slices(model, X_val, y_val, tier_val, args.min_slice_positives)
+        slices.to_csv(os.path.join(args.output_data_dir, "slice-evaluation.csv"), index=False)
+    else:
+        print(f"\nWARNING: no '{SLICE_COLUMN}' column - slice evaluation skipped")
 
     # 6. Save and register
     save_and_register_model(model, metrics, args)
