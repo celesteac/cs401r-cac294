@@ -32,11 +32,18 @@ import argparse
 import json
 import os
 import pickle
+import sys
 from datetime import datetime, timezone
 
 import boto3
 import numpy as np
 import pandas as pd
+
+# On Windows, piped stdout (`... | tee train-final.log`) defaults to cp1252,
+# which cannot encode the box-drawing and check-mark characters this script
+# prints, so the run crashes with UnicodeEncodeError at the evaluation report.
+sys.stdout.reconfigure(encoding="utf-8")
+sys.stderr.reconfigure(encoding="utf-8")
 
 # SageMaker imports — available in SageMaker training containers.
 #
@@ -109,6 +116,10 @@ def parse_args():
     parser.add_argument("--min-child-weight", type=int, default=5)
     parser.add_argument("--subsample", type=float, default=0.8)
     parser.add_argument("--colsample-bytree", type=float, default=0.8)
+    parser.add_argument("--early-stopping-rounds", type=int, default=20,
+                        help="Stop when validation AUC has not improved for this many rounds")
+    parser.add_argument("--seed", type=int, default=42,
+                        help="XGBoost random seed (row/column subsampling)")
     parser.add_argument("--scale-pos-weight", type=float, default=None,
                         help=(
                             "XGBoost positive-class weight. Leave unset and it is computed "
@@ -397,7 +408,7 @@ def train_model(X_train: np.ndarray,
         "subsample": args.subsample,
         "colsample_bytree": args.colsample_bytree,
         "scale_pos_weight": spw,
-        "seed": 42,
+        "seed": args.seed,
         "verbosity": 1,
     }
 
@@ -408,7 +419,7 @@ def train_model(X_train: np.ndarray,
         dtrain=dtrain,
         num_boost_round=args.num_round,
         evals=[(dtrain, "train"), (dval, "validation")],
-        early_stopping_rounds=20,
+        early_stopping_rounds=args.early_stopping_rounds,
         verbose_eval=25,
     )
 
