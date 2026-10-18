@@ -77,6 +77,8 @@ class HarnessAgent:
         """
         # runtimeSessionId must be >= 33 characters.
         sid = f"{session_id or 'session'}-{uuid.uuid4()}"
+        # Exposed so callers can tie a result to its rows in agent-traces.jsonl.
+        self.last_session_id = sid
         kwargs = dict(harnessArn=self.arn, runtimeSessionId=sid,
                       messages=[{"role": "user", "content": [{"text": message}]}])
         if system_prompt:

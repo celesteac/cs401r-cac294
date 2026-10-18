@@ -146,6 +146,14 @@ category_diversity_score 15.0 · total_spend_90d 14.1 · online_to_store_ratio 1
 - Harness config from the kit: Haiku 4.5 via the `us.` inference profile, `max_iterations = 8`, `max_tokens = 1024`,
   `memory { disabled {} }`, idle session timeout 60 s (runtime memory was 90% of the reference stack's bill at the
   900 s default).
+- Evaluation (2 runs, 6 scenarios each): 6/6 both times per the harness, ~$0.053 per run. But zero
+  `escalate_to_human` tool calls: escalation happened only in prose, and the harness's keyword fallback counted it. A
+  concrete example of **an LLM-judged or keyword-judged metric overstating behavior**, and of why the lab insists the
+  action be a tool call (auditable, routable) rather than text. Good material for the production-risk paragraph.
+- Pre-Lab access regression: on 2026-10-17 Claude calls failed with "Model use case details have not been submitted"
+  even though the same IAM user (`cs401r-lab`) passed on Oct 12. CloudTrail showed no earlier use-case form
+  submission. The form was submitted via `put_use_case_for_model_access` and access returned. Possible "operational
+  risk" point: model access is account state outside Terraform, so a working stack can break with no code change.
 - Production risk candidates: harmful action under customer pressure (TC-005: final-sale return for a long-tenure
   Platinum member); stateful abuse (split credits).
 
