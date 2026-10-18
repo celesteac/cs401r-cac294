@@ -1,0 +1,5 @@
+tier,n,positives,auc,recall_top10,recall_se,too_small,recall_below_aggregate
+Bronze,1071,361,0.7553,0.4377,0.0261,False,False
+Gold,483,52,0.746,0.1346,0.0473,False,True
+Platinum,307,21,0.882,0.0952,0.0641,True,True
+Silver,1139,226,0.7281,0.2301,0.028,False,True

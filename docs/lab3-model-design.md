@@ -53,18 +53,20 @@ _TODO: a specific architectural or evaluation change with 10x time or data._
   MLflow runs vary depth and learning rate (see the experiment table below).
 - Hyperparameters, seed and early-stopping patience are all CLI arguments (no literals in the training call).
 
-### Baseline vs full model (for section 2) — TRIAL RUN, replace with the graded run
+### Baseline vs full model (for section 2) — GRADED RUN `xgb-d6-eta0.03-r600-final`
 
 | | Value |
 |---|---|
-| Full model AUC | 0.7806 |
-| Recency-only baseline AUC | 0.7226 |
-| Lift | +0.058 |
-| 95% CI on lift (paired bootstrap, 2,000 reps) | [0.0383, 0.0774] — excludes 0 |
-| Precision @ top 10% | 0.7033 |
-| Recall @ top 10% | 0.3197 (ceiling ≈ 300 / 660 = 0.45) |
+| Full model AUC | **0.7857** |
+| Recency-only baseline AUC | **0.7226** |
+| Lift | **+0.0631** (≈ 23% of the way from the baseline to a perfect ranker: 0.0631 / (1 − 0.7226)) |
+| 95% CI on lift (paired bootstrap, 2,000 reps) | **[0.0441, 0.0824]**, excludes 0 |
+| Precision @ top 10% | 0.7300 (vs a 22% base rate, ~3.3× better than random contact) |
+| Recall @ top 10% | 0.3318 (ceiling ≈ 300 / 660 = 0.45, so ~74% of what is reachable) |
 
-Params: max_depth 6, eta 0.1, num_round 200, min_child_weight 5, subsample 0.8, colsample_bytree 0.8, seed 42.
+Params: max_depth 6, eta 0.03, num_round 600 (best iteration 16), min_child_weight 5, subsample 0.8,
+colsample_bytree 0.8, scale_pos_weight 3.545, seed 42. MLflow run dfc0f14a…, registry version 2.
+Compared with the lab reference (XGBoost 3.2.0, default-ish params): AUC 0.7696, lift +0.0464 [0.0254, 0.0670].
 
 ### MLflow experiment `northstar-churn` — runs so far (sections 1 and 2)
 
@@ -77,6 +79,11 @@ Baseline AUC is 0.7226 in every run (same rows, same baseline model).
 | xgb-d3-eta0.1 | 3 | 0.1 | 200 (36) | 0.7785 | +0.0559 [0.0372, 0.0747] | 0.7233 | 0.3288 |
 | xgb-d6-eta0.03-r600 | 6 | 0.03 | 600 (16) | **0.7857** | **+0.0631 [0.0441, 0.0824]** | **0.7300** | 0.3318 |
 | xgb-d3-eta0.03-r600 | 3 | 0.03 | 600 (3) | 0.7735 | +0.0509 [0.0307, 0.0719] | 0.6566* | 0.3621* |
+| xgb-d6-eta0.03-r600-regtest | 6 | 0.03 | 600 (16) | 0.7857 | same as above | 0.7300 | 0.3318 |
+| **xgb-d6-eta0.03-r600-final** (graded) | 6 | 0.03 | 600 (16) | 0.7857 | +0.0631 [0.0441, 0.0824] | 0.7300 | 0.3318 |
+
+(The regtest and final runs reproduce the d6-eta0.03 run exactly, so the pipeline is deterministic end to end:
+`ORDER BY customer_id` + fixed seeds.)
 
 - **Every configuration's lift CI excludes 0.** The feature-engineering result is robust to hyperparameters, not one lucky config.
 - AUC spans only 0.7735–0.7857 across these settings. The CIs overlap heavily, so hyperparameters matter much less than features.
@@ -86,11 +93,12 @@ Baseline AUC is 0.7226 in every run (same rows, same baseline model).
   top-10% metrics are not comparable to the others. (The skeleton's `>= percentile` cutoff includes ties.)
 - Silver is the weakest tier by AUC in every run (0.706–0.728).
 
-### Feature importance (for section 2) — TRIAL RUN
+### Feature importance (for section 2) — GRADED RUN
 
-Gain, highest first: days_since_last_purchase 58.7 · purchase_frequency_180d 56.6 · purchase_frequency_30d 22.2 ·
-avg_order_value 17.4 · purchase_frequency_90d 14.2 · total_lifetime_value 13.6 · avg_basket_size_6m 12.8 ·
-category_diversity_score 12.4 · total_spend_90d 11.2 · online_to_store_ratio 9.4 · customer_tenure_days 8.7
+Gain, highest first: days_since_last_purchase 93.2 · purchase_frequency_180d 92.3 · purchase_frequency_30d 43.4 ·
+avg_order_value 28.3 · purchase_frequency_90d 20.7 · total_lifetime_value 18.8 · avg_basket_size_6m 18.5 ·
+category_diversity_score 15.0 · total_spend_90d 14.1 · online_to_store_ratio 12.5 · customer_tenure_days 10.9
+(Same order as the default-param run, so the ranking is stable across hyperparameters.)
 
 - Recency still matters most, but **180-day frequency is nearly as strong**. Most of the lift over the recency
   baseline likely comes from the frequency features.
@@ -103,9 +111,11 @@ category_diversity_score 12.4 · total_spend_90d 11.2 · online_to_store_ratio 9
 
 ### Slice finding worth using (sections 2 and 4)
 
-- The single top-10% contact list is dominated by **Bronze** customers: Bronze recall@10% is 0.43, but Gold 0.13 and
-  Silver 0.20, even though their within-tier AUCs (0.74, 0.71) are reasonable. A "contact the top 10% overall" budget
-  mostly reaches low-spend customers.
+- The single top-10% contact list is dominated by **Bronze** customers (graded run): Bronze recall@10% is 0.44, but
+  Gold 0.13 and Silver 0.23, even though their within-tier AUCs (0.75, 0.73) are reasonable. A "contact the top 10%
+  overall" budget mostly reaches low-spend customers.
+- Silver is the weakest tier by AUC (0.7281, 226 churners). Platinum has the highest AUC (0.88) but only 21 churners,
+  so it's too small to conclude from.
 - Idea for section 4: tier-aware or value-weighted contact budgets (e.g., rank by churn probability × lifetime value),
   or a cost-based threshold from retention-offer economics.
 

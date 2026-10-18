@@ -48,11 +48,19 @@ _TODO: XGBoost version, data source, split, seed, run name, MLflow run, registry
 - Missing values: 0 in the current data; left as NaN by design (XGBoost native handling).
 - `churn_risk_score` excluded from inputs (if a run includes it, report with and without).
 
-### Trial run numbers (default params) — replace with the graded run
+### GRADED RUN — `xgb-d6-eta0.03-r600-final` (use these numbers in the report)
 
-- AUC 0.7806 · P@10% 0.7033 · R@10% 0.3197 · baseline AUC 0.7226 · lift +0.058 · CI [0.0383, 0.0774]
-- Params: max_depth 6, eta 0.1, num_round 200 (early-stopped ~round 30), min_child_weight 5, subsample 0.8,
-  colsample_bytree 0.8, scale_pos_weight 3.545 (computed), seed 42.
+- Athena `QueryExecutionId` **1b890a7e-025f-47c7-a03a-37716caec411** (in `train-final.log`; no CSV loader lines).
+- MLflow run **dfc0f14a9afc4213a4a6ea5351a7e87c**; registry **`northstar-churn-models` version 2**, PendingManualApproval.
+- Model artifact: `s3://northstar-dev-data-493155413162/artifacts/models/churn/xgb-d6-eta0.03-r600-final-20261018T001110Z/model.tar.gz`
+- **AUC 0.7857 · P@10% 0.7300 · R@10% 0.3318 · baseline AUC 0.7226 · lift +0.0631 · 95% CI [0.0441, 0.0824]**
+- Params: max_depth 6, eta 0.03, num_round 600 (best iteration 16, early stopping patience 20), min_child_weight 5,
+  subsample 0.8, colsample_bytree 0.8, scale_pos_weight 3.545 (computed), seed 42.
+- Chain verified: `evaluation_metrics.json` = MLflow run = registry v2 metadata on auc_roc, precision_top10,
+  recall_top10, baseline_auc, lift_ci_low, lift_ci_high (exact match). Registry v2 also stores the MLflow run ID.
+- Exactly 300 customers flagged (219 + 81), so no tie artifact in this model.
+- Registry v1 (`-regtest`, same config and identical metrics) is also PendingManualApproval. It was a test of the
+  registration code and can stay.
 
 ### MLflow runs so far (experiment `northstar-churn`)
 
@@ -89,31 +97,33 @@ _TODO: XGBoost version, data source, split, seed, run name, MLflow run, registry
   models on the same rows; take the 2.5th and 97.5th percentiles of (full AUC − baseline AUC). Resampling the two
   models independently would inflate the interval.
 
-### Confusion matrix — trial run
+### Confusion matrix — GRADED RUN (`lab3-evidence/confusion-matrix.png`)
 
-- Threshold = top-10% cutoff, p ≥ 0.636 (the same cutoff as the precision/recall gates, which is the actual retention decision).
-- TP 211 · FP 89 · FN 449 · TN 2,251. 211/300 flagged = precision 0.7033; 211/660 churners = recall 0.3197.
-- Recall ceiling: 300 contacts can catch at most 300 of 660 churners = 0.45. The 449 FN are mostly unavoidable at a 10% budget.
+- Threshold = top-10% cutoff, **p ≥ 0.588** (the same cutoff as the precision/recall gates, which is the actual retention decision).
+- **TP 219 · FP 81 · FN 441 · TN 2,259.** 219/300 flagged = precision 0.7300; 219/660 churners = recall 0.3318.
+- Recall ceiling: 300 contacts can catch at most 300 of 660 churners = 0.45. The 441 FN are mostly unavoidable at a 10% budget.
 
-### Feature importance — trial run (gain)
+### Feature importance — GRADED RUN (gain, `lab3-evidence/feature-importance.png`)
 
-days_since_last_purchase 58.7 · purchase_frequency_180d 56.6 · purchase_frequency_30d 22.2 · avg_order_value 17.4 ·
-purchase_frequency_90d 14.2 · total_lifetime_value 13.6 · avg_basket_size_6m 12.8 · category_diversity_score 12.4 ·
-total_spend_90d 11.2 · online_to_store_ratio 9.4 · customer_tenure_days 8.7
-(Gain chosen over split count; the plot shows unused features as 0.)
+days_since_last_purchase 93.2 · purchase_frequency_180d 92.3 · purchase_frequency_30d 43.4 · avg_order_value 28.3 ·
+purchase_frequency_90d 20.7 · total_lifetime_value 18.8 · avg_basket_size_6m 18.5 · category_diversity_score 15.0 ·
+total_spend_90d 14.1 · online_to_store_ratio 12.5 · customer_tenure_days 10.9
+(Same ranking as the trial run; absolute gains are larger because the lower learning rate makes each split count for more.
+Gain chosen over split count; the plot shows unused features as 0.)
 
-### Slice evaluation — trial run (aggregate recall@10% = 0.3197)
+### Slice evaluation — GRADED RUN (aggregate recall@10% = 0.3318, `lab3-evidence/slice-evaluation.csv`)
 
 | Tier | n | Churners | AUC | Recall@10% | Recall SE | Too small | Recall >10pp below aggregate |
 |---|---|---|---|---|---|---|---|
-| Bronze | 1,071 | 361 | 0.7609 | 0.4349 | 0.026 | no | no |
-| Gold | 483 | 52 | 0.7375 | 0.1346 | 0.047 | no | yes |
-| Platinum | 307 | 21 | 0.8536 | 0.0952 | 0.064 | **yes** | yes |
-| Silver | 1,139 | 226 | 0.7079 | 0.1991 | 0.027 | no | yes |
+| Bronze | 1,071 | 361 | 0.7553 | 0.4377 | 0.026 | no | no |
+| Gold | 483 | 52 | 0.7460 | 0.1346 | 0.047 | no | yes |
+| Platinum | 307 | 21 | 0.8820 | 0.0952 | 0.064 | **yes** | yes |
+| Silver | 1,139 | 226 | **0.7281** | 0.2301 | 0.028 | no | yes (just: 0.2301 < 0.2318) |
 
-- **Weakest tier: Silver** (lowest AUC, 0.7079). n = 1,139 and 226 churners, so this is a solid result.
+- **Weakest tier: Silver** (lowest AUC, 0.7281). n = 1,139 and 226 churners, so this is a solid result. Silver was the
+  weakest tier in every MLflow run, so it isn't a split artifact.
 - **Platinum is too small to conclude from**: 307 customers but only 21 churners (rule: < 30 churners, set by
-  `--min-slice-positives`). Its AUC of 0.85 is the highest, consistent with the lab's note that Platinum is the strongest
+  `--min-slice-positives`). Its AUC of 0.88 is the highest, consistent with the lab's note that Platinum is the strongest
   slice, but with 21 positives the recall SE is ±0.06.
 - "Too small" is based on **churners, not n**: AUC and recall are computed over the positives. At 30 positives the recall
   SE is ~0.08, about the size of the 10pp gap being flagged.

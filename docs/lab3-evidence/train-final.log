@@ -1,0 +1,80 @@
+sagemaker.config INFO - Not applying SDK defaults from location: C:\ProgramData\sagemaker\sagemaker\config.yaml
+sagemaker.config INFO - Not applying SDK defaults from location: C:\Users\Celeste\AppData\Local\sagemaker\sagemaker\config.yaml
+============================================================
+NorthStar Churn Prediction — Training Script
+============================================================
+Athena QueryExecutionId: 1b890a7e-025f-47c7-a03a-37716caec411
+Preprocessing 9,999 samples...
+  Missing feature values (left as NaN): 0
+  Positive class rate: 22.0%
+  Feature matrix shape: (9999, 11)
+
+Train: 6,999 | Validation: 3,000
+
+Training XGBoost with params: {
+  "objective": "binary:logistic",
+  "eval_metric": [
+    "logloss",
+    "auc"
+  ],
+  "max_depth": 6,
+  "eta": 0.03,
+  "min_child_weight": 5,
+  "subsample": 0.8,
+  "colsample_bytree": 0.8,
+  "scale_pos_weight": 3.544805194805195,
+  "seed": 42,
+  "verbosity": 1
+}
+[0]	train-logloss:0.68607	train-auc:0.76867	validation-logloss:0.68666	validation-auc:0.73370
+[25]	train-logloss:0.56514	train-auc:0.83818	validation-logloss:0.57918	validation-auc:0.78538
+[36]	train-logloss:0.53790	train-auc:0.84323	validation-logloss:0.55747	validation-auc:0.78565
+C:\Users\Celeste\DevRepos\cs401r-cac294\churn_training_skeleton.py:580: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  "eval_timestamp": datetime.utcnow().isoformat(),
+C:\Users\Celeste\DevRepos\cs401r-cac294\churn_training_skeleton.py:832: UserWarning: [18:11:10] WARNING: C:\actions-runner\_work\xgboost\xgboost\src\c_api\c_api.cc:1553: Saving model in the UBJSON format as default.  You can use a file extension: `json` or `ubj` to choose between formats.
+  model.save_model(model_path)
+C:\Users\Celeste\DevRepos\cs401r-cac294\churn_training_skeleton.py:845: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  "training_date": datetime.utcnow().isoformat(),
+
+── Evaluation Results ──────────────────────────────
+  precision_top10          : 0.7300  (threshold: 0.5000)  ✓ PASS
+  recall_top10             : 0.3318  (threshold: 0.2500)  ✓ PASS
+  auc_lift 95% CI          : [0.0441, 0.0824]  (must exclude 0)  ✓ PASS
+  All thresholds passed ✓
+
+── Slice Evaluation by loyalty_tier (aggregate recall@10%: 0.3318) ──
+    tier    n  positives    auc  recall_top10  recall_se  too_small  recall_below_aggregate
+  Bronze 1071        361 0.7553        0.4377     0.0261      False                   False
+    Gold  483         52 0.7460        0.1346     0.0473      False                    True
+Platinum  307         21 0.8820        0.0952     0.0641       True                    True
+  Silver 1139        226 0.7281        0.2301     0.0280      False                    True
+  Weakest tier by AUC: Silver (AUC 0.7281, n=1139, positives=226)
+  Platinum: only 21 positives (< 30) - too small to conclude from
+
+── Evaluation Plots ─────────────────────────────────
+  Confusion matrix at top-10% cutoff p >= 0.5880: TP=219 FP=81 FN=441 TN=2259
+  Feature importance (gain), highest first:
+    days_since_last_purchase        93.20
+    purchase_frequency_180d         92.30
+    purchase_frequency_30d          43.39
+    avg_order_value                 28.34
+    purchase_frequency_90d          20.67
+    total_lifetime_value            18.80
+    avg_basket_size_6m              18.54
+    category_diversity_score        15.00
+    total_spend_90d                 14.11
+    online_to_store_ratio           12.45
+    customer_tenure_days            10.88
+  Saved confusion-matrix.png and feature-importance.png to docs/lab3-evidence
+
+✓ Logged MLflow run 'xgb-d6-eta0.03-r600-final' (dfc0f14a9afc4213a4a6ea5351a7e87c) to experiment 'northstar-churn'
+🏃 View run xgb-d6-eta0.03-r600-final at: https://mlflow.sagemaker.us-east-1.app.aws/#/experiments/1/runs/dfc0f14a9afc4213a4a6ea5351a7e87c
+🧪 View experiment at: https://mlflow.sagemaker.us-east-1.app.aws/#/experiments/1
+
+✓ Model saved to C:/Users/Celeste/AppData/Local/Temp/claude/C--Users-Celeste-DevRepos-cs401r-cac294/5327cd73-df70-4df6-8495-47371ffe0479/scratchpad/final-model\model.xgb
+  Uploaded model artifact to s3://northstar-dev-data-493155413162/artifacts/models/churn/xgb-d6-eta0.03-r600-final-20261018T001110Z/model.tar.gz
+✓ Registered arn:aws:sagemaker:us-east-1:493155413162:model-package/northstar-churn-models/2 as PendingManualApproval
+
+============================================================
+Training complete. AUC-ROC: 0.7857
+============================================================
