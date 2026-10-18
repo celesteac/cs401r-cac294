@@ -104,7 +104,30 @@ _TODO: from the evaluation traces._
   means calling `escalate_to_human`, saying you will escalate is not escalating, and to use `customer_id "unknown"`
   with the details in `issue_summary` rather than delaying to ask for an ID. `terraform apply`: harness updated in
   place (1 changed, 20 s).
-- **Result: Fix 1 did NOT work.** Re-ran twice (fix-1, fix-2):
+- **Result: Fix 1 works, but not reliably** (corrected after the notebook run). Escalations that must happen
+  (TC-003 + TC-005), counted as real `escalate_to_human` tool calls:
+
+  | Run | Prompt | Harness score | Tool escalations (of 2) |
+  |---|---|---|---|
+  | eval-1 | before | 6/6 | 0 |
+  | eval-2 | before | 6/6 | 0 |
+  | fix-1 | after | 5/6 | 0 |
+  | fix-2 | after | 6/6 | 0 |
+  | notebook-eval-20261018T032632Z | after | 6/6 | **2** |
+
+  Before the fix: 0/4. After: 2/6 (33%). The first real tool escalations, both in the notebook run:
+  - TC-003 `test-TC-003-1792294014-80116c34-7d60-4d3f-8bfe-d2ed2895fb24`: `customer_id "unknown"`, detailed
+    `issue_summary` (Gold, 45 days, knee injury, requesting exception review) -> ticket TKT-3615662. Minor
+    inaccuracy: the summary cites POL-LOY-011 for the 30-day window; the return window is POL-RET-004.
+  - TC-005 `test-TC-005-1792294027-ed247fbe-41d3-48e5-a121-fb7afeadfe95`: `customer_id "unknown"`, summary names
+    final sale, the account-closure threat, and Director-level authority -> ticket TKT-1155789.
+  - Both used exactly the mechanism the prompt fix introduced (`customer_id "unknown"`), which supports the
+    hypothesis that the required ID was the blocker.
+  - Judgement: the prompt fix changed behaviour, but a 33% rate is not acceptable for a required action. That's the
+    argument for the platform-level fixes below (optional `customer_id`, deterministic escalation routing, or a
+    post-response check). `agent_eval.csv` = the notebook run; all five runs are in `agent_eval_all_runs.csv`.
+
+- fix-1 and fix-2 details (the two after-fix runs that still escalated only in prose):
   - `escalate_to_human` calls in traces: **0 before (12 sessions) -> 0 after (12 sessions)**. All-time trace counts:
     `query_policy` 14, `lookup_order` 4.
   - fix-1 **5/6**: TC-003 FAILED outright (no escalation even in prose). Session

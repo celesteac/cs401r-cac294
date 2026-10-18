@@ -150,6 +150,10 @@ category_diversity_score 15.0 · total_spend_90d 14.1 · online_to_store_ratio 1
   `escalate_to_human` tool calls: escalation happened only in prose, and the harness's keyword fallback counted it. A
   concrete example of **an LLM-judged or keyword-judged metric overstating behavior**, and of why the lab insists the
   action be a tool call (auditable, routable) rather than text. Good material for the production-risk paragraph.
+- Prompt fix for escalation (rule 3 in system_prompt.md: escalating = calling the tool, `customer_id "unknown"` if
+  unknown): tool escalations on TC-003/TC-005 went from 0/4 before to 2/6 after (33%). The fix changes behaviour, but
+  a prompt is a probabilistic control. Same lesson as the cap: required actions and limits belong in the platform
+  (schema, routing, gateway policy), with the prompt as the weakest layer.
 - Pre-Lab access regression: on 2026-10-17 Claude calls failed with "Model use case details have not been submitted"
   even though the same IAM user (`cs401r-lab`) passed on Oct 12. CloudTrail showed no earlier use-case form
   submission. The form was submitted via `put_use_case_for_model_access` and access returned. Possible "operational
