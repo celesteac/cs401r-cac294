@@ -127,6 +127,17 @@ category_diversity_score 12.4 · total_spend_90d 11.2 · online_to_store_ratio 9
 - Production risk candidates: harmful action under customer pressure (TC-005: final-sale return for a long-tenure
   Platinum member); stateful abuse (split credits).
 
+### Registry / deployment caveat (possible section 4 or Lab 5 note)
+
+- The model is trained on XGBoost 3.4.1 but registered against the SageMaker `xgboost:1.7-1` serving image. The package
+  stores the booster as JSON (the most portable format), but cross-version loading is not guaranteed. Lab 5 should
+  check that the container loads it and reproduces the evaluated scores.
+- The saved booster keeps all trees up to where training stopped (37 for the d6/eta0.03 run), while evaluation scored at
+  the best iteration (16). XGBoost 3.x predicts at `best_iteration` automatically; an older serving runtime might use
+  all 37 trees. Another thing to verify at deploy time, or fix by slicing the booster to the best iteration before saving.
+- Version mismatch between training and serving is a concrete "what I'd do differently": train in the same container
+  version that serves (or pin XGBoost locally to the container's version).
+
 ### Ideas for section 4 (10x time or data)
 
 - Time-based backtest (train at one cutoff `T`, test at a later one) instead of a random split. Rebuild features at

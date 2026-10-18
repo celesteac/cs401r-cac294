@@ -70,6 +70,17 @@ _TODO: XGBoost version, data source, split, seed, run name, MLflow run, registry
   all numeric metrics under the same keys as `evaluation_metrics.json`, `best_iteration`, and the plots and slice CSV as
   artifacts (`s3://<bucket>/artifacts/mlflow/...`).
 
+### Model Registry (test registration — the graded run will add its own version)
+
+- Group `northstar-churn-models` created on first `--register`. **Version 1** = run `xgb-d6-eta0.03-r600-regtest`
+  (MLflow run `d94454f35bb647b08c13c6052d28c28f`), status **PendingManualApproval**, package status Completed.
+- CustomerMetadataProperties = every `evaluation_metrics.json` key as a string, plus `run_name`, `mlflow_run_id`,
+  `xgboost_version`, `data_source`. That's the registry link in the "one chain of numbers".
+- Artifact: `s3://<bucket>/artifacts/models/churn/<run-name>-<UTC timestamp>/model.tar.gz` containing `xgboost-model`
+  (booster saved as JSON). Serving image recorded: `sagemaker-xgboost:1.7-1`.
+- Never set to Approved here; approval is a human step (Lab 5). The evidence script FAILs without a pending
+  version and WARNs if any version is Approved.
+
 ### Baseline / CI method (for the "Baseline comparison" section)
 
 - Baseline = XGBoost on `days_since_last_purchase` alone, same train rows, scored on the same test rows.

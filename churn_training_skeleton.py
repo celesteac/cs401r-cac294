@@ -148,6 +148,18 @@ def parse_args():
                         help="Name for this run. Make it descriptive -- 'run3' tells "
                              "you nothing three weeks later.")
 
+    # Model Registry (Task 1, 5 points)
+    parser.add_argument("--register", action="store_true",
+                        help="Register this run's model in the Model Registry as "
+                             "PendingManualApproval. Off by default so trial runs "
+                             "do not each create a registry version.")
+    parser.add_argument("--model-package-group", type=str, default="northstar-churn-models",
+                        help="Model Registry group. Lab 5 deploys from northstar-churn-models "
+                             "by name; change it only deliberately.")
+    parser.add_argument("--xgboost-container-version", type=str, default="1.7-1",
+                        help="SageMaker XGBoost serving image version recorded in the "
+                             "model package")
+
     parser.add_argument("--model-dir", type=str,
                         default=os.environ.get("SM_MODEL_DIR", "./model"))
     parser.add_argument("--output-data-dir", type=str,
@@ -799,6 +811,7 @@ def track_run(args, metrics: dict, scale_pos_weight: float) -> None:
             if os.path.isfile(path):
                 mlflow.log_artifact(path)
 
+        args.mlflow_run_id = run.info.run_id   # recorded in the registry metadata
         print(f"\n✓ Logged MLflow run '{args.run_name}' ({run.info.run_id}) "
               f"to experiment '{args.mlflow_experiment}'")
 
@@ -834,23 +847,76 @@ def save_and_register_model(model: xgb.Booster,
     with open(os.path.join(args.model_dir, "model_metadata.json"), "w") as f:
         json.dump(metadata, f, indent=2)
 
-    # TODO: Register in SageMaker Model Registry
-    # The model package group must be "northstar-churn-models" -- Lab 5 deploys
-    # from that group by name, so any other name breaks Lab 5.
-    # Include the evaluation metrics in the model card / description
-    # Status must be "PendingManualApproval" — never "Approved" from this script
-    #
-    # sm_client = boto3.client("sagemaker")
-    # sm_client.create_model_package(
-    #     ModelPackageGroupName="northstar-churn-models",
-    #     ModelPackageDescription=f"Churn model trained {datetime.utcnow().date()}",
-    #     InferenceSpecification={...},
-    #     ModelApprovalStatus="PendingManualApproval",
-    #     CustomerMetadataProperties={
-    #         k: str(v) for k, v in metrics.items()
-    #     },
-    # )
-    print("TODO: Register model in SageMaker Model Registry (see comments above)")
+    if not args.register:
+        print("(no --register given; skipping Model Registry registration)")
+        return
+
+    # Register in SageMaker Model Registry. The group must be
+    # "northstar-churn-models" (the default) -- Lab 5 deploys from that group
+    # by name. Status is PendingManualApproval, never "Approved" from this
+    # script: a human approves a model before anything deploys it.
+    region = boto3.session.Session().region_name or "us-east-1"
+    sm_client = boto3.client("sagemaker", region_name=region)
+    group = args.model_package_group
+
+    try:
+        sm_client.describe_model_package_group(ModelPackageGroupName=group)
+    except sm_client.exceptions.ClientError:
+        sm_client.create_model_package_group(
+            ModelPackageGroupName=group,
+            ModelPackageGroupDescription="NorthStar churn prediction (XGBoost on Feature Store features)",
+        )
+        print(f"  Created model package group {group}")
+
+    # Package the model the way the SageMaker XGBoost container loads it: a
+    # model.tar.gz holding a file named "xgboost-model". JSON is the most
+    # portable booster format across XGBoost versions.
+    import tarfile
+    container_model = os.path.join(args.model_dir, "xgboost-model")
+    with open(container_model, "wb") as f:
+        f.write(model.save_raw("json"))
+    tar_path = os.path.join(args.model_dir, "model.tar.gz")
+    with tarfile.open(tar_path, "w:gz") as tar:
+        tar.add(container_model, arcname="xgboost-model")
+
+    # artifacts/ is the prefix model artifacts belong under (Lab 1 layout).
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    key = f"artifacts/models/churn/{args.run_name or 'run'}-{stamp}/model.tar.gz"
+    boto3.client("s3", region_name=region).upload_file(tar_path, args.artifacts_bucket, key)
+    model_data_url = f"s3://{args.artifacts_bucket}/{key}"
+    print(f"  Uploaded model artifact to {model_data_url}")
+
+    image_uri = sagemaker.image_uris.retrieve("xgboost", region, args.xgboost_container_version)
+
+    # The metrics go in CustomerMetadataProperties as strings, with the same
+    # keys as evaluation_metrics.json: the evidence script matches the graded
+    # run to this version by auc_roc, precision_top10 and recall_top10.
+    customer_metadata = {k: str(v) for k, v in metrics.items()}
+    customer_metadata.update({
+        "run_name": str(args.run_name),
+        "mlflow_run_id": str(getattr(args, "mlflow_run_id", None)),
+        "xgboost_version": xgb.__version__,
+        "data_source": "local_csv" if args.local_data_path else "feature_store_athena",
+    })
+
+    response = sm_client.create_model_package(
+        ModelPackageGroupName=group,
+        ModelPackageDescription=(
+            f"Churn model {args.run_name} trained {datetime.now(timezone.utc).date()} "
+            f"on XGBoost {xgb.__version__}: AUC {metrics['auc_roc']}, "
+            f"P@10% {metrics['precision_top10']}, R@10% {metrics['recall_top10']}, "
+            f"lift CI [{metrics['lift_ci_low']}, {metrics['lift_ci_high']}]"
+        ),
+        InferenceSpecification={
+            "Containers": [{"Image": image_uri, "ModelDataUrl": model_data_url}],
+            "SupportedContentTypes": ["text/csv"],
+            "SupportedResponseMIMETypes": ["text/csv"],
+        },
+        ModelApprovalStatus="PendingManualApproval",
+        CustomerMetadataProperties=customer_metadata,
+    )
+    arn = response["ModelPackageArn"]
+    print(f"✓ Registered {arn} as PendingManualApproval")
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -916,11 +982,12 @@ def main():
     # 5c. Confusion matrix and feature importance plots
     save_evaluation_plots(model, X_val, y_val, args.output_data_dir)
 
-    # 6. Save and register
-    save_and_register_model(model, metrics, args)
-
-    # 7. Track this run in your MLflow App (Task 1, 5 pts)
+    # 6. Track this run in your MLflow App (Task 1, 5 pts). Runs before
+    #    registration so the registry version can record the MLflow run ID.
     track_run(args, metrics, getattr(args, "resolved_scale_pos_weight", None))
+
+    # 7. Save and register
+    save_and_register_model(model, metrics, args)
 
     # 8. Write metrics to output. SageMaker also collects these as job output;
     #    that is job lineage, NOT experiment tracking. It records that a job

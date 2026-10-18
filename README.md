@@ -244,7 +244,11 @@ _TODO: write this section before submitting. It must describe how to train, how 
   hyperparameters `--max-depth --eta --num-round --min-child-weight --subsample --colsample-bytree --scale-pos-weight`
   (unset = computed from the training split), `--seed`, `--early-stopping-rounds`, `--min-slice-positives`,
   `--model-dir`, `--output-data-dir`. `--local-data-path` exists for development only.
-- Graded run: `--output-data-dir docs/lab3-evidence 2>&1 | tee docs/lab3-evidence/train-final.log`.
+- Graded run: `--register --output-data-dir docs/lab3-evidence 2>&1 | tee docs/lab3-evidence/train-final.log`.
+- `--register` registers the model as `PendingManualApproval` in `--model-package-group` (default `northstar-churn-models`,
+  created on first use). It packages `model.tar.gz` (`xgboost-model`, JSON) to
+  `s3://<bucket>/artifacts/models/churn/<run-name>-<timestamp>/` and records every metric plus the MLflow run ID in
+  CustomerMetadataProperties. Without `--register`, the model is only saved locally to `--model-dir`.
 - The script forces UTF-8 stdout so `| tee` works on Windows.
 - With `--mlflow-arn`, each run logs params, metrics (same keys as `evaluation_metrics.json`), `best_iteration`, and
   the plots and slice CSV as artifacts to experiment `northstar-churn`. Omit it to skip tracking.
