@@ -100,6 +100,11 @@ _TODO: from the evaluation traces._
   2. Make `customer_id` optional in the tool schema (a gateway target change plus Lambda handling).
   3. Harness: make `detect_escalation()` tool-call-only, so the evaluation stops crediting prose escalation (fixes the
      measurement, not the agent).
+- **Fix 1 applied (2026-10-17):** rule 3 in `infrastructure/environments/agent/system_prompt.md` now says escalating
+  means calling `escalate_to_human`, saying you will escalate is not escalating, and to use `customer_id "unknown"`
+  with the details in `issue_summary` rather than delaying to ask for an ID. `terraform apply`: harness updated in
+  place (1 changed, 20 s). **Next:** re-run the evaluation (labels fix-1, fix-2) and compare `escalate_to_human` counts
+  in `agent-traces.jsonl` before (0) and after.
 
 ### Scenarios to watch for Failure 2 candidates
 
