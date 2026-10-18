@@ -130,7 +130,12 @@ category_diversity_score 15.0 · total_spend_90d 14.1 · online_to_store_ratio 1
     `approval_required=True` with a ticket instead of applying.
   - **Gateway Cedar `forbid` policy.** Enforced by the platform **before** the tool runs, independent of the model.
     `policy_tests.py` proves it with no model in the loop. This is the one to trust alone.
-- But even the gateway rule is **per-call**: two $40 credits pass (the split-credit hole). Link to `track-c-failures.md`.
+- Evidence the gateway layer works alone (`policy-tests.json`, 7/7, no model in the loop): $51 and $75 were DENIED
+  at the gateway by `cap_loyalty_credit` before `tools.py` ran. $30 and $50 were allowed.
+- But even the gateway rule is **per-call**: two $40 credits pass (the split-credit hole), and one customer received $160
+  across four allowed calls in one test run. Link to `track-c-failures.md`.
+- Deployment facts: `terraform apply` created 14 resources on the first attempt (TODO 1 had all three policy
+  permissions up front, so the expected `GetPolicyEngine` failure never happened). Harness creation took 34 s.
 - How the three Terraform TODOs implement enforcement (from `infrastructure/environments/agent/main.tf`):
   - TODO 1: the gateway execution role gets `GetPolicyEngine` (engine ARN) and `AuthorizeAction` +
     `PartiallyAuthorizeActions` (engine ARN and gateway glob). Without them, the gateway can't evaluate Cedar at all.
