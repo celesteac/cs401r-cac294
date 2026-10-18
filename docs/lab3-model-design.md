@@ -131,6 +131,13 @@ category_diversity_score 15.0 · total_spend_90d 14.1 · online_to_store_ratio 1
   - **Gateway Cedar `forbid` policy.** Enforced by the platform **before** the tool runs, independent of the model.
     `policy_tests.py` proves it with no model in the loop. This is the one to trust alone.
 - But even the gateway rule is **per-call**: two $40 credits pass (the split-credit hole). Link to `track-c-failures.md`.
+- How the three Terraform TODOs implement enforcement (from `infrastructure/environments/agent/main.tf`):
+  - TODO 1: the gateway execution role gets `GetPolicyEngine` (engine ARN) and `AuthorizeAction` +
+    `PartiallyAuthorizeActions` (engine ARN and gateway glob). Without them, the gateway can't evaluate Cedar at all.
+  - TODO 2: the harness role gets `bedrock-agentcore:InvokeGateway` on the one gateway ARN (least privilege).
+  - TODO 3: Cedar `forbid ... apply_loyalty_credit ... when { context.input.amount > 50 }`. In Cedar a forbid always
+    overrides a permit, so it carves over-cap credits out of the blanket `permit_tools` grant. The policy engine runs
+    in **ENFORCE** mode with `validation_mode = FAIL_ON_ANY_FINDINGS`.
 - Harness config from the kit: Haiku 4.5 via the `us.` inference profile, `max_iterations = 8`, `max_tokens = 1024`,
   `memory { disabled {} }`, idle session timeout 60 s (runtime memory was 90% of the reference stack's bill at the
   900 s default).

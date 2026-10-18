@@ -143,14 +143,33 @@ resource "aws_iam_role_policy" "gateway" {
         Resource = aws_lambda_function.tools.arn
       },
       # TODO (student) 1: the gateway enforces Cedar policies by calling the
-      # policy engine. Add a statement that lets this role do that.
-      # Symptom if missing: terraform apply fails creating the gateway with
-      # "Access denied while calling GetPolicyEngine". CreateGateway checks
-      # this role up front and names ONE missing action per attempt, so expect
-      # to iterate. Read the AgentCore developer guide page "AgentCore Gateway
-      # and Policy in AgentCore IAM Permissions" (Gateway Execution Role) and
-      # add them all at once instead. Scope Resource to the policy engine ARN
-      # and local.gateway_glob.
+      # policy engine. Per the AgentCore developer guide ("AgentCore Gateway
+      # and Policy in AgentCore IAM Permissions", Gateway Execution Role), it
+      # needs all three of:
+      #   GetPolicyEngine            read the engine's configuration
+      #   AuthorizeAction            evaluate Cedar for one tool call
+      #   PartiallyAuthorizeActions  list the tools a caller may invoke
+      # The two authorization actions are checked against BOTH the policy
+      # engine and the gateway. The gateway is matched by local.gateway_glob
+      # because this role must exist before the gateway does.
+      {
+        Sid      = "PolicyEngineConfiguration"
+        Effect   = "Allow"
+        Action   = "bedrock-agentcore:GetPolicyEngine"
+        Resource = aws_bedrockagentcore_policy_engine.this.policy_engine_arn
+      },
+      {
+        Sid    = "PolicyEngineAuthorization"
+        Effect = "Allow"
+        Action = [
+          "bedrock-agentcore:AuthorizeAction",
+          "bedrock-agentcore:PartiallyAuthorizeActions",
+        ]
+        Resource = [
+          aws_bedrockagentcore_policy_engine.this.policy_engine_arn,
+          local.gateway_glob,
+        ]
+      },
     ]
   })
 }
@@ -241,6 +260,31 @@ resource "aws_bedrockagentcore_policy" "permit_tools" {
 #   - amount is an integer in tool_definitions.json. Compare it as one.
 # Symptom if missing: python agent/policy_tests.py reports BAD for the $51 and
 # $75 credits, which the gateway allows.
+#
+# In Cedar a forbid always overrides a permit, so this carves the over-cap
+# credits out of the blanket permit_tools grant. amount is a required integer
+# in the tool schema, so it is always present and compares as a Long.
+
+resource "aws_bedrockagentcore_policy" "cap_loyalty_credit" {
+  name             = "cap_loyalty_credit"
+  policy_engine_id = aws_bedrockagentcore_policy_engine.this.policy_engine_id
+  validation_mode  = "FAIL_ON_ANY_FINDINGS"
+  definition {
+    cedar {
+      statement = <<-CEDAR
+        forbid (
+          principal,
+          action == AgentCore::Action::"${local.target_name}___apply_loyalty_credit",
+          resource == AgentCore::Gateway::"${aws_bedrockagentcore_gateway.this.gateway_arn}"
+        )
+        when { context.input.amount > ${var.credit_cap_dollars} };
+      CEDAR
+    }
+  }
+  # Created after the permit: a forbid with no permit beside it is rejected as
+  # "Overly Restrictive: Policy Engine will deny every request".
+  depends_on = [aws_bedrockagentcore_policy.permit_tools]
+}
 
 # ---------------------------------------------------------------------------
 # Harness and its execution role
@@ -290,9 +334,15 @@ resource "aws_iam_role_policy" "harness" {
         ]
       },
       # TODO (student) 2: the harness calls your tools through the gateway.
-      # Add the one statement that allows it, scoped to this gateway's ARN.
-      # Symptom if missing: every invocation fails with "Failed to load tool
-      # 'northstar_tools' ... 403 Forbidden" on the gateway URL.
+      # The gateway uses the AWS_IAM authorizer, so each MCP request the
+      # harness sends is authorized as bedrock-agentcore:InvokeGateway on
+      # this one gateway.
+      {
+        Sid      = "InvokeNorthStarToolsGateway"
+        Effect   = "Allow"
+        Action   = "bedrock-agentcore:InvokeGateway"
+        Resource = aws_bedrockagentcore_gateway.this.gateway_arn
+      },
     ]
   })
 }

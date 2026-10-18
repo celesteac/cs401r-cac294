@@ -23,8 +23,18 @@ _TODO: from the evaluation traces._
   memory of earlier calls, and each call on its own is under the cap.
 - What would stop it: state checked at enforcement time. Examples: a per-customer/per-session running total in the tools
   Lambda or a database, or a policy that can read session history.
-- To research: AgentCore session-aware ("temporal") policies. What they need from the architecture, and whether a
-  **harness** supports them today. Note that the kit's harness is configured with `memory { disabled {} }`.
+- AgentCore session-aware ("temporal") policies. From the AgentCore developer guide page "AgentCore Gateway and
+  Policy in AgentCore IAM Permissions" (section *IAM permissions for temporal policies*):
+  - Temporal policy is active only when **a policy session ID is supplied** with the request and a Policy Engine is attached.
+  - The gateway has to **propagate the caller's session identity** by minting a Workload Access Token. On the AWS_IAM
+    inbound flow, that means the **gateway execution role** needs `bedrock-agentcore:GetWorkloadAccessToken` on its
+    workload-identity directory, in addition to the three policy permissions from TODO 1. Without it, tool calls fail
+    with `AccessDenied` on `GetWorkloadAccessToken`.
+  - So the architecture would need (a) the caller (the harness) to send a policy session ID on each tool call, and
+    (b) that extra gateway-role permission. **Still to check:** whether a harness can pass a policy session ID through
+    to the gateway today (the harness `tool` block in `main.tf` has no such setting). The dedicated temporal-policy page
+    (`policy-temporal.html`) should answer this.
+  - The kit's harness also has `memory { disabled {} }`, and the gateway role currently has no `GetWorkloadAccessToken`.
 - `tools.py` only blocks a single credit over $50 (returns `approval_required=True` + a ticket), so it doesn't
   catch the split either.
 
