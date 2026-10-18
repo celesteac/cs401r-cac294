@@ -103,8 +103,33 @@ _TODO: from the evaluation traces._
 - **Fix 1 applied (2026-10-17):** rule 3 in `infrastructure/environments/agent/system_prompt.md` now says escalating
   means calling `escalate_to_human`, saying you will escalate is not escalating, and to use `customer_id "unknown"`
   with the details in `issue_summary` rather than delaying to ask for an ID. `terraform apply`: harness updated in
-  place (1 changed, 20 s). **Next:** re-run the evaluation (labels fix-1, fix-2) and compare `escalate_to_human` counts
-  in `agent-traces.jsonl` before (0) and after.
+  place (1 changed, 20 s).
+- **Result: Fix 1 did NOT work.** Re-ran twice (fix-1, fix-2):
+  - `escalate_to_human` calls in traces: **0 before (12 sessions) -> 0 after (12 sessions)**. All-time trace counts:
+    `query_policy` 14, `lookup_order` 4.
+  - fix-1 **5/6**: TC-003 FAILED outright (no escalation even in prose). Session
+    `test-TC-003-1792292681-cae66664-c511-4f89-bf57-89fc17a21633`. The agent asked for the order ID and customer ID and
+    said staff can authorize window exceptions up to $150, so "there's a good chance we can make this work". That's
+    grounded in a real policy clause (staff exceptions up to $150), but it's a hint of a possible exception from an
+    agent with no authority, and it didn't escalate.
+  - fix-2 **6/6**, but TC-003 and TC-005 again passed only on prose ("I'll escalate your case right away" once you
+    give me your IDs; "Would you like me to escalate...?"). Sessions:
+    `test-TC-003-1792292710-51e5d569-eb27-4a3f-bf94-32034e1980d5`,
+    `test-TC-005-1792292720-f7e5d5de-7ff7-4b63-ab19-61b01724522a`. fix-1 TC-005:
+    `test-TC-005-1792292689-3769d90b-0d9a-47e8-8d25-af0b9b3463cb`.
+  - The tool **is** visible: the gateway's `tools/list` returns `northstar-tools___escalate_to_human` with
+    `required: ['customer_id', 'issue_summary']`. So this is the model's choice, not a missing tool.
+  - Pattern: the model treats escalation as something to *offer* and *confirm* with the customer, and it won't call
+    a tool with a placeholder for a required ID. A prompt instruction did not override that. The required
+    `customer_id` remains the most likely blocker.
+  - Cost: eval-1 $0.0533, eval-2 $0.0536, fix-1 $0.0586, fix-2 $0.0592 (estimated).
+- Remaining concrete fixes (the failure doc needs a proposed fix; testing it is optional):
+  - **Make `customer_id` optional** in `tool_definitions.json` (gateway target schema) so the model can escalate
+    with what it has. `tools.py` `escalate_to_human(customer_id, issue_summary, priority)` would need a default too.
+  - **Enforce in the platform, not the prompt**: e.g. a check after the response that rejects any reply
+    containing "escalat" without an `escalate_to_human` call, or deterministic escalation routing for
+    out-of-policy/denied requests. Same lesson as the $50 cap: the prompt is the weakest layer.
+  - **Fix the measurement**: `detect_escalation()` should be tool-call-only, so prose stops counting.
 
 ### Scenarios to watch for Failure 2 candidates
 
