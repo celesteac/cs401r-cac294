@@ -246,6 +246,8 @@ _TODO: write this section before submitting. It must describe how to train, how 
   `--model-dir`, `--output-data-dir`. `--local-data-path` exists for development only.
 - Graded run: `--output-data-dir docs/lab3-evidence 2>&1 | tee docs/lab3-evidence/train-final.log`.
 - The script forces UTF-8 stdout so `| tee` works on Windows.
+- With `--mlflow-arn`, each run logs params, metrics (same keys as `evaluation_metrics.json`), `best_iteration`, and
+  the plots and slice CSV as artifacts to experiment `northstar-churn`. Omit it to skip tracking.
 
 **Evaluate**
 - Gates (enforced by the script; failing a gate stops before registration): precision@10% ≥ 0.50,

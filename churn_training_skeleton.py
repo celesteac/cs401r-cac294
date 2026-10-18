@@ -426,6 +426,9 @@ def train_model(X_train: np.ndarray,
         verbose_eval=25,
     )
 
+    # Recorded for track_run(): the round early stopping kept.
+    args.best_iteration = model.best_iteration
+
     return model
 
 
@@ -755,40 +758,49 @@ def track_run(args, metrics: dict, scale_pos_weight: float) -> None:
         print("\n(no --mlflow-arn given; skipping experiment tracking)")
         return
 
-    # TODO: log this run to the MLflow App.
-    #
-    # import mlflow
-    #
-    # mlflow.set_tracking_uri(args.mlflow_arn)   # the App ARN, verbatim
-    # mlflow.set_experiment(args.mlflow_experiment)
-    #
-    # with mlflow.start_run(run_name=args.run_name):
-    #     mlflow.log_params({
-    #         "max_depth": args.max_depth,
-    #         "eta": args.eta,
-    #         "num_round": args.num_round,
-    #         "min_child_weight": args.min_child_weight,
-    #         "subsample": args.subsample,
-    #         "colsample_bytree": args.colsample_bytree,
-    #         "scale_pos_weight": scale_pos_weight,
-    #         "xgboost_version": xgb.__version__,   # see below -- this matters
-    #     })
-    #     mlflow.log_metrics({
-    #         k: v for k, v in metrics.items() if isinstance(v, (int, float))
-    #     })
-    #
-    # LOG THE XGBOOST VERSION AS A PARAM. Lab 3 documents that identical data
-    # and an identical split produce different metrics on XGBoost 3.2.0 vs 1.7
-    # (the SageMaker training container is 1.7). If you train some runs locally
-    # and some through SageMaker and do not record the version, you will end up
-    # comparing two things that were never comparable and cannot tell why.
-    #
-    # THREE RUNS IS THE FLOOR, NOT THE GOAL. Three runs with identical
-    # hyperparameters and different seeds is the same experiment three times;
-    # it earns 2 of 5. Vary something you can defend, and be able to say what
-    # the variation did to the metrics.
+    import mlflow
 
-    print("TODO: Log run to MLflow App (see comments above)")
+    mlflow.set_tracking_uri(args.mlflow_arn)   # the App ARN, verbatim
+    mlflow.set_experiment(args.mlflow_experiment)
+
+    with mlflow.start_run(run_name=args.run_name) as run:
+        mlflow.log_params({
+            "max_depth": args.max_depth,
+            "eta": args.eta,
+            "num_round": args.num_round,
+            "min_child_weight": args.min_child_weight,
+            "subsample": args.subsample,
+            "colsample_bytree": args.colsample_bytree,
+            # The RESOLVED value, so runs that let it compute itself do not
+            # log None for the parameter most likely to move precision/recall.
+            "scale_pos_weight": scale_pos_weight,
+            "seed": args.seed,
+            "early_stopping_rounds": args.early_stopping_rounds,
+            # Identical data and split give different metrics on XGBoost 3.x
+            # vs 1.7 (the SageMaker container), so the version is a parameter
+            # of the result, not a footnote.
+            "xgboost_version": xgb.__version__,
+            "data_source": "local_csv" if args.local_data_path else "feature_store_athena",
+        })
+        # Same keys as evaluation_metrics.json (auc_roc, precision_top10, ...):
+        # the evidence script matches a run to that file by these names.
+        mlflow.log_metrics({
+            k: v for k, v in metrics.items() if isinstance(v, (int, float))
+        })
+        # Early stopping decides how many trees the model actually has, so the
+        # round it stopped at is part of what a run varied.
+        if getattr(args, "best_iteration", None) is not None:
+            mlflow.log_metric("best_iteration", args.best_iteration)
+
+        # The evaluation outputs written so far, so each run's plots and slice
+        # table can be compared in the MLflow UI. Stored under artifacts/mlflow/.
+        for name in ("slice-evaluation.csv", "confusion-matrix.png", "feature-importance.png"):
+            path = os.path.join(args.output_data_dir, name)
+            if os.path.isfile(path):
+                mlflow.log_artifact(path)
+
+        print(f"\n✓ Logged MLflow run '{args.run_name}' ({run.info.run_id}) "
+              f"to experiment '{args.mlflow_experiment}'")
 
 
 # ── Model Saving & Registry ────────────────────────────────────────────────────

@@ -54,6 +54,22 @@ _TODO: XGBoost version, data source, split, seed, run name, MLflow run, registry
 - Params: max_depth 6, eta 0.1, num_round 200 (early-stopped ~round 30), min_child_weight 5, subsample 0.8,
   colsample_bytree 0.8, scale_pos_weight 3.545 (computed), seed 42.
 
+### MLflow runs so far (experiment `northstar-churn`)
+
+| Run | AUC | Lift [95% CI] | P@10% | R@10% | Best round |
+|---|---|---|---|---|---|
+| xgb-d6-eta0.1 | 0.7806 | +0.0580 [0.0383, 0.0774] | 0.7033 | 0.3197 | 10 |
+| xgb-d3-eta0.1 | 0.7785 | +0.0559 [0.0372, 0.0747] | 0.7233 | 0.3288 | 36 |
+| xgb-d6-eta0.03-r600 | 0.7857 | +0.0631 [0.0441, 0.0824] | 0.7300 | 0.3318 | 16 |
+| xgb-d3-eta0.03-r600 | 0.7735 | +0.0509 [0.0307, 0.0719] | 0.6566* | 0.3621* | 3 |
+
+- Leading candidate for the graded run: **depth 6, eta 0.03, 600 rounds** (best on AUC, lift, precision).
+- *Tie artifact: that model flagged 364 customers (12.1%) at the `>= 90th percentile` cutoff, so its P/R are not "top 10%".
+  If the graded model has many tied scores, report the actual number flagged.
+- Each run logs params (incl. resolved scale_pos_weight, seed, early_stopping_rounds, xgboost_version, data_source),
+  all numeric metrics under the same keys as `evaluation_metrics.json`, `best_iteration`, and the plots and slice CSV as
+  artifacts (`s3://<bucket>/artifacts/mlflow/...`).
+
 ### Baseline / CI method (for the "Baseline comparison" section)
 
 - Baseline = XGBoost on `days_since_last_purchase` alone, same train rows, scored on the same test rows.
