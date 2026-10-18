@@ -6,7 +6,8 @@ extends the same codebase.
 | Lab | What it adds | Status |
 |---|---|---|
 | Lab 1 — Platform Foundation | VPC, S3 data bucket, MLEngineer IAM role, SageMaker Studio domain, remote state, LocalStack validation | Done |
-| Lab 2 — Data & Feature Engineering | Private subnet + NAT Gateway, DataEngineer and ModelMonitor roles, S3 lifecycle rules, Glue ingestion pipeline, SageMaker Feature Store | This lab |
+| Lab 2 — Data & Feature Engineering | Private subnet + NAT Gateway, DataEngineer and ModelMonitor roles, S3 lifecycle rules, Glue ingestion pipeline, SageMaker Feature Store | Done |
+| Lab 3 — Model Development | XGBoost churn model on Feature Store features (MLflow App tracking, Model Registry), Track C customer service agent on Amazon Bedrock AgentCore | This lab |
 
 ## Repository layout
 
@@ -22,6 +23,12 @@ infrastructure/
   environments/
     dev/            real AWS account (S3 remote state)
     local/          LocalStack (vpc, storage, iam only; NAT and lifecycle rules disabled)
+    agent/          (Lab 3) AgentCore harness, gateway, Cedar policies, tools Lambda; own state, AWS provider 6.x
+churn_training_skeleton.py   (Lab 3) churn model: Athena pull, XGBoost, evaluation, MLflow, Model Registry
+evaluation_harness.py        (Lab 3) Track B RAGAS cases and Track C agent scenarios
+agent/                       (Lab 3) tools.py, Lambda handler, harness_client.py, policy_tests.py, run_agent_eval.py
+northstar-policy-docs/       (Lab 3) policy corpus the agent's query_policy tool reads
+notebooks/lab3-demo.ipynb    (Lab 3) Track C end-to-end demo, committed with outputs
 glue-scripts/
   transform.py         raw/customers/ CSV -> processed/customers/ Parquet
   feature_engineer.py  processed/customers/ -> features/customers/ + Feature Store
@@ -30,11 +37,15 @@ scripts/
   verify-lab1.sh       Lab 1 rubric checks
   verify-lab2.sh       Lab 2 rubric checks (the same assertions the TA runs)
   teardown-lab2.sh     full Lab 2 teardown, including resources Terraform does not own
+  collect-lab3-evidence.sh  (Lab 3) exports Athena/MLflow/registry/AgentCore evidence and cross-checks it
+  teardown-lab3.sh     (Lab 3) endpoints, jobs, Tracking Server check, agent stack destroy
   check-secrets.sh     scans every revision for committed AWS credentials
 docs/
   lab1/                Lab 1 evidence, ADR, cost estimate, architecture diagram
   lab2/                Lab 2 diagram sources (.drawio)
   lab2-*               Lab 2 deliverables (see "Lab 2 documents" below)
+  lab3-*.md            Lab 3 evaluation report and design justification
+  lab3-evidence/       Lab 3 run logs, metrics, plots, exported AWS evidence, agent traces
 Makefile               make local-validate / local-destroy / local-clean (LocalStack)
 docker-compose.yml     LocalStack container
 ```
@@ -221,52 +232,127 @@ and finally checks the live API to confirm that nothing billable is left. It kee
 | [docs/lab2-data-lineage.png](docs/lab2-data-lineage.png) | Lineage from source to Feature Store, with formats and IAM roles on each edge |
 | [docs/lab2/](docs/lab2/) | Editable `.drawio` sources for the architecture and lineage diagrams |
 
-## Lab 3 — Model Development (draft)
+## Lab 3 — Model Development
 
-_TODO: write this section before submitting. It must describe how to train, how to evaluate, and where artifacts land
-(Task 4, 1 point). Also update the lab table and repository layout at the top._
+Two systems built on the platform: **Track A**, a churn prediction model trained on the Lab 2 Feature Store, and
+**Track C**, NorthStar's customer service agent on Amazon Bedrock AgentCore. Results are in
+[docs/lab3-evaluation-report.md](docs/lab3-evaluation-report.md) (churn),
+[docs/lab3-evidence/track-c-failures.md](docs/lab3-evidence/track-c-failures.md) (agent) and
+[docs/lab3-model-design.md](docs/lab3-model-design.md) (design justification).
 
-### Notes (working notes — delete this subsection before submitting)
+### Prerequisites
 
-**Prerequisites**
-- The Lab 2 platform must be up: `terraform apply` in `infrastructure/environments/dev`, then the data pipeline above.
-  Feature Group `northstar-dev-customer-features` should hold 9,999 records in its offline store.
-- Python packages: `pip install "sagemaker>=2.200.0,<3.0.0" xgboost scikit-learn pandas numpy matplotlib boto3 mlflow sagemaker-mlflow`.
-  sagemaker must be < 3.0 (3.x removed `sagemaker.feature_store`). `sagemaker-mlflow` is the SigV4 auth plugin for the App ARN.
-- MLflow **App** (not a Tracking Server), created once with `aws sagemaker create-mlflow-app`:
-  name `northstar-mlflow`, ARN `arn:aws:sagemaker:us-east-1:493155413162:mlflow-app/app-UA4K3MH52C63`,
-  artifact store `s3://<bucket>/artifacts/mlflow/`, role `northstar-dev-MLEngineer` (both from Terraform outputs).
-- Optional env vars: `MLFLOW_APP_ARN` (read by `--mlflow-arn`), `SAGEMAKER_SUPPRESS_V2_WARNING=1`.
+- The Lab 2 platform deployed (`terraform apply` in `infrastructure/environments/dev`) and the data pipeline above run
+  end to end. The Feature Group `northstar-dev-customer-features` holds 9,999 customers in its offline store.
+- Python packages:
+  ```bash
+  pip install "sagemaker>=2.200.0,<3.0.0" xgboost scikit-learn pandas numpy matplotlib boto3 mlflow sagemaker-mlflow
+  ```
+  `sagemaker` must stay below 3.0, because 3.x removed `sagemaker.feature_store`. `sagemaker-mlflow` is the SigV4
+  plugin that lets MLflow talk to an `arn:aws:sagemaker:...` tracking URI.
+- A SageMaker MLflow **App** (serverless and free, not the $0.60/hr Tracking Server), created once and kept for Labs 4
+  and 6. It uses the Lab 1 bucket and role, both read from Terraform outputs:
+  ```bash
+  aws sagemaker create-mlflow-app --name northstar-mlflow \
+    --artifact-store-uri s3://$(terraform -chdir=infrastructure/environments/dev output -raw s3_bucket_name)/artifacts/mlflow/ \
+    --role-arn $(terraform -chdir=infrastructure/environments/dev output -raw ml_engineer_role_arn) \
+    --query Arn --output text
+  export MLFLOW_APP_ARN=<the ARN printed above>
+  ```
+- Track C: Bedrock access to Claude Haiku 4.5 (`docs/bedrock-access-verification.txt`), boto3 ≥ 1.43.57,
+  AWS CLI ≥ 2.36, Terraform ≥ 1.7.5.
 
-**Train**
-- `churn_training_skeleton.py` runs locally under your own AWS credentials (MLEngineer has no Athena permissions).
-- Arguments: `--feature-group-name`, `--artifacts-bucket` (from `terraform output`), `--mlflow-arn`, `--run-name`,
-  hyperparameters `--max-depth --eta --num-round --min-child-weight --subsample --colsample-bytree --scale-pos-weight`
-  (unset = computed from the training split), `--seed`, `--early-stopping-rounds`, `--min-slice-positives`,
-  `--model-dir`, `--output-data-dir`. `--local-data-path` exists for development only.
-- Graded run: `--register --output-data-dir docs/lab3-evidence 2>&1 | tee docs/lab3-evidence/train-final.log`.
-- `--register` registers the model as `PendingManualApproval` in `--model-package-group` (default `northstar-churn-models`,
-  created on first use). It packages `model.tar.gz` (`xgboost-model`, JSON) to
-  `s3://<bucket>/artifacts/models/churn/<run-name>-<timestamp>/` and records every metric plus the MLflow run ID in
-  CustomerMetadataProperties. Without `--register`, the model is only saved locally to `--model-dir`.
-- The script forces UTF-8 stdout so `| tee` works on Windows.
-- With `--mlflow-arn`, each run logs params, metrics (same keys as `evaluation_metrics.json`), `best_iteration`, and
-  the plots and slice CSV as artifacts to experiment `northstar-churn`. Omit it to skip tracking.
+### Train the churn model (Track A)
 
-**Evaluate**
-- Gates (enforced by the script; failing a gate stops before registration): precision@10% ≥ 0.50,
-  recall@10% ≥ 0.25, 95% paired-bootstrap CI on the AUC lift over the recency-only baseline excludes 0. AUC is report-only.
-- Slice evaluation by `loyalty_tier`; tiers with fewer than 30 churners are flagged too small.
-- Track C: `python agent/policy_tests.py`, and `evaluation_harness.py` via `LocalAgentEvaluator` + `agent/harness_client.py`.
+`churn_training_skeleton.py` runs locally under your own AWS credentials. The MLEngineer role has no Athena
+permissions by design. Every name comes from an argument, and the defaults match the Terraform outputs:
 
-**Where artifacts land**
-- `docs/lab3-evidence/`: `train-final.log`, `evaluation_metrics.json`, `slice-evaluation.csv`, `confusion-matrix.png`,
-  `feature-importance.png`, plus the exported AWS evidence from `scripts/collect-lab3-evidence.sh`.
-- `s3://<bucket>/artifacts/athena-results/`: Athena query results. `s3://<bucket>/artifacts/mlflow/`: MLflow artifacts.
-- `./model/`: local `model.xgb` + `model_metadata.json` (default `--model-dir`).
-- MLflow experiment `northstar-churn`; Model Registry group `northstar-churn-models` (`PendingManualApproval`).
-- Track C: `agent-traces.jsonl`, `agent-cost.csv`, `policy-tests.json` in `docs/lab3-evidence/`; harness output in `evaluation_results/`.
+```bash
+python churn_training_skeleton.py \
+  --feature-group-name "$(terraform -chdir=infrastructure/environments/dev output -raw feature_group_name)" \
+  --artifacts-bucket   "$(terraform -chdir=infrastructure/environments/dev output -raw s3_bucket_name)" \
+  --mlflow-arn "$MLFLOW_APP_ARN" \
+  --max-depth 6 --eta 0.03 --num-round 600 \
+  --run-name xgb-d6-eta0.03-r600-final \
+  --register \
+  --output-data-dir docs/lab3-evidence \
+  2>&1 | tee docs/lab3-evidence/train-final.log
+```
 
-**Windows**
-- Run the `.sh` scripts from Git Bash. `collect-lab3-evidence.sh` calls `python3`, which is the Microsoft Store stub here.
-  Fallback: `python scripts/collect_lab3_evidence.py --track C 2>&1 | tee docs/lab3-evidence/collect-output.txt`.
+What one run does:
+
+1. Queries the Feature Store offline store through Athena (latest record per customer, deleted rows excluded,
+   `ORDER BY customer_id` for a reproducible split) and prints the `Athena QueryExecutionId`.
+2. Splits the rows into a stratified 70/30 train/test split (6,999 / 3,000). Missing feature values stay NaN for
+   XGBoost's native handling.
+3. Trains XGBoost with `scale_pos_weight` computed from the training split, and early-stops on validation AUC.
+4. Evaluates against the gates and **stops before registration if one fails**: precision@10% ≥ 0.50, recall@10% ≥ 0.25,
+   and a 95% paired-bootstrap CI on the AUC lift over a recency-only baseline that excludes 0. AUC is reported only.
+5. Runs the slice evaluation by `loyalty_tier`. Tiers with fewer than `--min-slice-positives` (30) churners are
+   flagged too small to conclude from. Then it writes the confusion matrix (at the top-10% cutoff) and the
+   gain-based feature importance.
+6. Logs the run to MLflow experiment `northstar-churn` (params, the resolved `scale_pos_weight`, `xgboost_version`,
+   every metric, and the plots and slice CSV as artifacts).
+7. With `--register`, uploads `model.tar.gz` and registers a **`PendingManualApproval`** version in
+   `northstar-churn-models`. The metrics and the MLflow run ID go in its metadata. Approval is a human step (Lab 5).
+
+Other arguments: `--min-child-weight`, `--subsample`, `--colsample-bytree`, `--scale-pos-weight` (leave unset to
+compute it), `--seed`, `--early-stopping-rounds`, `--model-package-group`, `--xgboost-container-version`,
+`--model-dir`. `--local-data-path` is for development only. Omit `--mlflow-arn` or `--register` for trial runs.
+
+### Deploy and evaluate the agent (Track C)
+
+The agent stack has its **own Terraform root and state** (`infrastructure/environments/agent/`, AWS provider 6.x,
+state key `agent/terraform.tfstate`). It never touches the Labs 1–2 root.
+
+```bash
+cd infrastructure/environments/agent
+cp backend.tf.example backend.tf      # account ID filled in (already done in this repo)
+terraform init && terraform apply     # 14 resources: harness, gateway (ENFORCE), Cedar policies, tools Lambda, IAM
+cd ../../..
+
+python agent/policy_tests.py              # $50 cap enforced at the gateway, no model -> policy-tests.json
+python agent/run_agent_eval.py --runs 2   # 6 scenarios per run, each in its own session
+```
+
+`agent/harness_client.py` records every tool call in `docs/lab3-evidence/agent-traces.jsonl` and one cost row per
+session in `agent-cost.csv`. `run_agent_eval.py` writes one CSV per run, with session IDs, to `evaluation_results/`.
+The final run is copied to `docs/lab3-evidence/agent_eval.csv`. The end-to-end demo is
+[notebooks/lab3-demo.ipynb](notebooks/lab3-demo.ipynb), committed with the outputs of one clean Restart & Run All.
+
+### Where artifacts land
+
+| Artifact | Location |
+|---|---|
+| Training log, metrics, slice table, plots | `docs/lab3-evidence/` (`train-final.log`, `evaluation_metrics.json`, `slice-evaluation.csv`, `confusion-matrix.png`, `feature-importance.png`) |
+| Athena query results | `s3://<bucket>/artifacts/athena-results/` |
+| MLflow runs and their artifacts | MLflow App `northstar-mlflow`, experiment `northstar-churn`; files under `s3://<bucket>/artifacts/mlflow/` |
+| Registered model | Model Registry group `northstar-churn-models`; `model.tar.gz` under `s3://<bucket>/artifacts/models/churn/<run-name>-<timestamp>/` |
+| Local model copy | `--model-dir` (default `./model/`) |
+| Agent evidence | `docs/lab3-evidence/` (`policy-tests.json`, `agent-traces.jsonl`, `agent-cost.csv`, `agent_eval.csv`, `agent_eval_all_runs.csv`) |
+| Raw evaluation runs | `evaluation_results/` |
+| Exported AWS evidence | `docs/lab3-evidence/` (`account.json`, `athena-query.json`, `mlflow-app.json`, `mlflow-runs.csv`, `model-registry.json`, `agentcore-config.json`, `collect-output.txt`) |
+
+### Collect evidence, then tear down
+
+Run these from Git Bash, in this order: **collect the evidence before teardown**, because the AgentCore config no
+longer exists afterwards.
+
+```bash
+bash scripts/collect-lab3-evidence.sh --track C   # exports AWS-only evidence and checks the chain of numbers
+bash scripts/teardown-lab3.sh                     # endpoints, jobs, Tracking Server check, agent stack destroy
+bash scripts/teardown-lab2.sh                     # the Lab 2 platform, including the NAT Gateway
+```
+
+The teardown deliberately keeps the free MLflow App (Labs 4 and 6 use it) and the Model Registry entries.
+
+### Lab 3 documents
+
+| File | Contents |
+|---|---|
+| [docs/lab3-evaluation-report.md](docs/lab3-evaluation-report.md) | Churn metrics, baseline comparison with CI, confusion matrix, feature importance, slice evaluation, provenance |
+| [docs/lab3-model-design.md](docs/lab3-model-design.md) | Design justification (Task 3) |
+| [docs/lab3-evidence/track-c-failures.md](docs/lab3-evidence/track-c-failures.md) | Track C failure cases with fixes |
+| [notebooks/lab3-demo.ipynb](notebooks/lab3-demo.ipynb) | Track C end-to-end demo |
+| [docs/bedrock-access-verification.txt](docs/bedrock-access-verification.txt) | Pre-Lab 3 Bedrock access check |
+| `docs/lab3-teardown-output.txt` | Teardown verification |

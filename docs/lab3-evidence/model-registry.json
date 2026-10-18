@@ -1,0 +1,51 @@
+{
+  "ModelPackageGroupName": "northstar-churn-models",
+  "Versions": [
+    {
+      "ModelPackageArn": "arn:aws:sagemaker:us-east-1:493155413162:model-package/northstar-churn-models/2",
+      "ModelPackageVersion": 2,
+      "ModelApprovalStatus": "PendingManualApproval",
+      "CreationTime": "2026-10-17 18:11:09.888000-06:00",
+      "ModelPackageDescription": "Churn model xgb-d6-eta0.03-r600-final trained 2026-10-18 on XGBoost 3.4.1: AUC 0.7857, P@10% 0.73, R@10% 0.3318, lift CI [0.0441, 0.0824]",
+      "CustomerMetadataProperties": {
+        "auc_roc": "0.7857",
+        "auc_vs_baseline": "0.0631",
+        "baseline_auc": "0.7226",
+        "data_source": "feature_store_athena",
+        "eval_timestamp": "2026-10-18T00:11:02.455339",
+        "lift_ci_high": "0.0824",
+        "lift_ci_low": "0.0441",
+        "mlflow_run_id": "dfc0f14a9afc4213a4a6ea5351a7e87c",
+        "n_val_samples": "3000",
+        "positive_rate_val": "0.22",
+        "precision_top10": "0.73",
+        "recall_top10": "0.3318",
+        "run_name": "xgb-d6-eta0.03-r600-final",
+        "xgboost_version": "3.4.1"
+      }
+    },
+    {
+      "ModelPackageArn": "arn:aws:sagemaker:us-east-1:493155413162:model-package/northstar-churn-models/1",
+      "ModelPackageVersion": 1,
+      "ModelApprovalStatus": "PendingManualApproval",
+      "CreationTime": "2026-10-17 18:03:50.857000-06:00",
+      "ModelPackageDescription": "Churn model xgb-d6-eta0.03-r600-regtest trained 2026-10-18 on XGBoost 3.4.1: AUC 0.7857, P@10% 0.73, R@10% 0.3318, lift CI [0.0441, 0.0824]",
+      "CustomerMetadataProperties": {
+        "auc_roc": "0.7857",
+        "auc_vs_baseline": "0.0631",
+        "baseline_auc": "0.7226",
+        "data_source": "feature_store_athena",
+        "eval_timestamp": "2026-10-18T00:03:42.510193",
+        "lift_ci_high": "0.0824",
+        "lift_ci_low": "0.0441",
+        "mlflow_run_id": "d94454f35bb647b08c13c6052d28c28f",
+        "n_val_samples": "3000",
+        "positive_rate_val": "0.22",
+        "precision_top10": "0.73",
+        "recall_top10": "0.3318",
+        "run_name": "xgb-d6-eta0.03-r600-regtest",
+        "xgboost_version": "3.4.1"
+      }
+    }
+  ]
+}
