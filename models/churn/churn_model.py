@@ -129,6 +129,12 @@ def train_model(X_train: np.ndarray,
         "objective": "binary:logistic",
         "eval_metric": ["logloss", "auc"],
         **HYPERPARAMETERS,
+        # Churn risk may never fall as a customer goes longer without buying.
+        # Unconstrained, the model's recency curve depends on the XGBoost
+        # build: Lab 3's 3.x model rises, but the container's 1.7 model dips
+        # enough to fail test_model_monotone_on_recency.
+        "monotone_constraints": "(" + ",".join(
+            "1" if c == BASELINE_FEATURE else "0" for c in FEATURE_COLUMNS) + ")",
         "scale_pos_weight": spw,
         "seed": seed,
         "verbosity": 1,
