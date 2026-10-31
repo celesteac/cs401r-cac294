@@ -40,6 +40,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from data.feature_engineering import build_churn_feature_set
+
 # ── Configuration ─────────────────────────────────────────────────────────────
 
 RAW_PATH = os.environ.get("NORTHSTAR_RAW", "./data/northstar-raw-sample.csv")
@@ -286,25 +288,64 @@ class TestFeatures:
             "you anchored to FEATURE_CUTOFF and not to today()"
         )
 
-    # TODO: Add a test proving no feature used post-cutoff data.
-    # Careful: processed/ CONTAINS the holdout purchases (after FEATURE_CUTOFF),
-    # because the label is built from them, so "every customer's max
-    # purchase_date is <= FEATURE_CUTOFF" is false on correct data. Test the
-    # FEATURES instead: recompute the time-sensitive ones (recency, tenure, the
-    # 30/90/180-day frequencies) from processed rows with purchase_date <=
-    # FEATURE_CUTOFF -- your data/feature_engineering.py functions do this --
-    # and assert they equal what the pipeline wrote to features/.
+    def test_features_are_fresh(self, features_df):
+        """The pipeline refuses to train on a feature set older than 48 hours.
 
-    # TODO: Add a freshness test. The pipeline should refuse to train on a
-    # feature set older than 48 hours. event_time is Fractional epoch seconds:
-    # the wall-clock time your Lab 2 feature job ran, NOT the cutoff T.
-    # Consequence: re-run the northstar-dev-feature-engineer Glue job (~90 s)
-    # before any session in which you will push, or this test fails the build.
+        event_time is Fractional epoch seconds: the wall-clock time the Lab 2
+        feature job ran, NOT the cutoff T. Re-run the
+        northstar-dev-feature-engineer Glue job (~90 s) before any session in
+        which you will push, or this test fails the build.
+        """
+        newest = pd.to_datetime(features_df["event_time"].max(), unit="s", utc=True)
+        age = pd.Timestamp.now(tz="UTC") - newest
+        assert age < pd.Timedelta(hours=48), (
+            f"Newest feature row is {age} old (event_time {newest}). Re-run the "
+            f"northstar-dev-feature-engineer Glue job."
+        )
 
 
 # ── Cross-dataset consistency ─────────────────────────────────────────────────
 
 class TestConsistency:
+
+    @pytest.fixture(scope="class")
+    def recomputed_features(self, processed_df, features_df):
+        """Features rebuilt from processed/ by the pandas port.
+
+        build_churn_feature_set only reads rows on or before FEATURE_CUTOFF.
+        processed/ CONTAINS the holdout purchases, because the label is built
+        from them, so comparing what it recomputes to what the pipeline wrote
+        is how to test for leakage: asserting every purchase_date <= cutoff
+        would be false on correct data.
+        """
+        return build_churn_feature_set(
+            customers=features_df[["customer_id"]],
+            transactions=processed_df,
+            snapshot_date=FEATURE_CUTOFF,
+        )
+
+    def test_no_feature_used_post_cutoff_data(self, features_df, recomputed_features):
+        """A time-sensitive feature built past the cutoff would not match."""
+        merged = features_df.merge(recomputed_features, on="customer_id",
+                                   suffixes=("_pipeline", "_cutoff"))
+        assert len(merged) == len(features_df)
+        for col in ["days_since_last_purchase", "customer_tenure_days",
+                    "purchase_frequency_30d", "purchase_frequency_90d",
+                    "purchase_frequency_180d"]:
+            differs = merged[f"{col}_pipeline"] != merged[f"{col}_cutoff"]
+            assert not differs.any(), (
+                f"{col} differs from a recompute over rows <= {FEATURE_CUTOFF.date()} "
+                f"for {differs.sum()} customers - a feature saw post-cutoff data"
+            )
+
+    def test_pandas_port_matches_glue_output(self, features_df, recomputed_features):
+        """data/feature_engineering.py is only worth testing if it computes
+        what the Glue job computes. Glue rounds some columns to 4 places."""
+        merged = features_df.merge(recomputed_features, on="customer_id",
+                                   suffixes=("_pipeline", "_port"))
+        for col in FEATURE_COLUMNS:
+            gap = (merged[f"{col}_pipeline"] - merged[f"{col}_port"]).abs().max()
+            assert gap <= 1e-4, f"{col} differs from the Glue output by up to {gap}"
 
     def test_feature_customers_are_subset_of_processed(self, processed_df, features_df):
         proc = set(processed_df["customer_id"].unique())

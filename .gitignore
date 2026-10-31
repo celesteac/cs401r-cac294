@@ -13,3 +13,6 @@ __pycache__/
 instructions/
 # Lab 2 starter data (13 MB, regenerable from template repo)
 northstar-raw-sample.csv
+# Lab 4: pipeline output copied down for local test runs
+data/processed/
+data/features/

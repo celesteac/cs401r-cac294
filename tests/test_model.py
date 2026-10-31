@@ -20,10 +20,13 @@ Run locally (after the local training run in the lab handout):
         --eval-metrics-path /tmp/out/evaluation_metrics.json
 """
 
+import io
 import json
 import os
+import warnings
 from pathlib import Path
 
+import boto3
 import numpy as np
 import pandas as pd
 import pytest
@@ -33,6 +36,51 @@ try:
     XGBOOST_AVAILABLE = True
 except ImportError:
     XGBOOST_AVAILABLE = False
+
+TOLERANCE = 0.02
+
+
+def regresses(new_auc, champ_auc, tolerance=TOLERANCE):
+    """True if the candidate is worse than the champion by more than tolerance.
+
+    Rounded because the metrics are stored to 4 places and the subtraction
+    is not (0.7857 - 0.02 is 0.76569999...), and a tie is not a regression.
+    """
+    return round(new_auc, 4) < round(champ_auc - tolerance, 4)
+
+
+def champion_from_registry(sm=None, s3=None, group="northstar-churn-models"):
+    """Return (package_arn, champion_auc), or None if nothing is Approved yet.
+
+    The champion is the newest APPROVED package, not the newest package: the
+    candidate under test is already registered as PendingManualApproval by the
+    time this runs.
+
+    Exceptions are not caught: an unreadable registry fails the test.
+    """
+    region = os.environ.get("AWS_REGION", "us-east-1")
+    sm = sm or boto3.client("sagemaker", region_name=region)
+    s3 = s3 or boto3.client("s3", region_name=region)
+
+    approved = sm.list_model_packages(
+        ModelPackageGroupName=group,
+        ModelApprovalStatus="Approved",
+        SortBy="CreationTime",
+        SortOrder="Descending",
+        MaxResults=1,
+    )["ModelPackageSummaryList"]
+    if not approved:
+        return None
+
+    arn = approved[0]["ModelPackageArn"]
+    pkg = sm.describe_model_package(ModelPackageName=arn)
+    # The pipeline's RegisterModel step points ModelMetrics at the
+    # evaluation_metrics.json that training job uploaded.
+    metrics_uri = pkg["ModelMetrics"]["ModelQuality"]["Statistics"]["S3Uri"]
+    bucket, _, key = metrics_uri[len("s3://"):].partition("/")
+    body = s3.get_object(Bucket=bucket, Key=key)["Body"].read()
+    return arn, float(json.loads(body)["auc_roc"])
+
 
 # ── CLI Option ─────────────────────────────────────────────────────────────────
 #
@@ -414,6 +462,26 @@ class TestStoredMetricsGate:
             f"model beats the recency-only baseline; it will not be promoted."
         )
 
+    def test_candidate_not_worse_than_champion(self, eval_metrics):
+        """The candidate may not regress more than TOLERANCE below the champion.
+
+        The warning goes in before the assert because a passing test prints
+        nothing under pytest -v. The buildspec runs this file with -rw, so it
+        lands in the warnings summary and the log shows which champion was used.
+        """
+        champ = champion_from_registry()
+        if champ is None:
+            pytest.skip("no Approved package yet")
+        arn, champ_auc = champ
+        version = arn.rsplit("/", 1)[-1]
+        new_auc = float(eval_metrics["auc_roc"])
+        warnings.warn(f"champion v{version} auc={champ_auc:.4f}; "
+                      f"candidate auc={new_auc:.4f}")
+        assert not regresses(new_auc, champ_auc), (
+            f"Candidate AUC {new_auc:.4f} regresses more than {TOLERANCE} "
+            f"below champion v{version} ({champ_auc:.4f})"
+        )
+
     def test_positive_rate_is_realistic(self, eval_metrics):
         """The validation set churn rate should be near the measured 22%."""
         rate = eval_metrics.get("positive_rate_val", -1)
@@ -424,3 +492,60 @@ class TestStoredMetricsGate:
             f"The reference dataset measures 22.0%. Check that your validation "
             f"split is stratified."
         )
+
+
+# ── Champion Lookup, Offline ───────────────────────────────────────────────────
+
+class FakeSageMaker:
+    """Stands in for the boto3 client and records what it was asked for."""
+
+    def __init__(self, summaries):
+        self.summaries = summaries
+        self.list_kwargs = None
+
+    def list_model_packages(self, **kwargs):
+        self.list_kwargs = kwargs
+        return {"ModelPackageSummaryList": self.summaries}
+
+    def describe_model_package(self, ModelPackageName):
+        return {"ModelMetrics": {"ModelQuality": {"Statistics": {
+            "S3Uri": "s3://bucket/artifacts/evaluations/abc/evaluation_metrics.json"}}}}
+
+
+class FakeS3:
+    def __init__(self, auc):
+        self.auc = auc
+        self.requested = None
+
+    def get_object(self, Bucket, Key):
+        self.requested = (Bucket, Key)
+        return {"Body": io.BytesIO(json.dumps({"auc_roc": self.auc}).encode())}
+
+
+class TestChampionLookup:
+    """No AWS: the regression test's logic has to be right even when nothing
+    is Approved, which is when the registry path above cannot exercise it."""
+
+    def test_regresses_at_the_tolerance_boundary(self):
+        assert regresses(0.73, 0.75) is False
+        assert regresses(0.7299, 0.75) is True
+
+    def test_better_candidate_does_not_regress(self):
+        assert regresses(0.80, 0.75) is False
+
+    def test_asks_only_for_approved_packages_newest_first(self):
+        sm = FakeSageMaker([])
+        champion_from_registry(sm=sm, s3=FakeS3(0.7))
+        assert sm.list_kwargs["ModelApprovalStatus"] == "Approved"
+        assert sm.list_kwargs["SortBy"] == "CreationTime"
+        assert sm.list_kwargs["SortOrder"] == "Descending"
+
+    def test_nothing_approved_returns_none(self):
+        assert champion_from_registry(sm=FakeSageMaker([]), s3=FakeS3(0.7)) is None
+
+    def test_reads_champion_auc_from_its_metrics_object(self):
+        arn = "arn:aws:sagemaker:us-east-1:123:model-package/northstar-churn-models/7"
+        s3 = FakeS3(0.7857)
+        result = champion_from_registry(sm=FakeSageMaker([{"ModelPackageArn": arn}]), s3=s3)
+        assert result == (arn, 0.7857)
+        assert s3.requested == ("bucket", "artifacts/evaluations/abc/evaluation_metrics.json")
