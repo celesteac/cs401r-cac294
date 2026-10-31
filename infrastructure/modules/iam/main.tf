@@ -46,8 +46,24 @@ data "aws_iam_policy_document" "ml_engineer" {
       "sagemaker:UpdateModelPackage",
       "sagemaker:DescribeModelPackage",
       "sagemaker:ListModelPackages",
+      "sagemaker:AddTags",
+      "sagemaker:ListTags",
     ]
     resources = ["*"]
+  }
+
+  # The SageMaker Pipeline runs as this role and starts a training job that is
+  # handed the same role, which is an iam:PassRole call on itself.
+  statement {
+    sid       = "PassSelfToSageMaker"
+    effect    = "Allow"
+    actions   = ["iam:PassRole"]
+    resources = [aws_iam_role.ml_engineer.arn]
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PassedToService"
+      values   = ["sagemaker.amazonaws.com"]
+    }
   }
 
   # Studio runs as this role: opening it calls DescribeDomain/ListApps, and
