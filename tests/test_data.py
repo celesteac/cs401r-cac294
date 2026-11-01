@@ -361,3 +361,8 @@ class TestConsistency:
             f"Only {survival:.1%} of raw rows survived to processed. Expected "
             f"85-100%; the transform should remove only null-key and duplicate rows."
         )
+
+
+def test_deliberate_failure_for_lab4_demo():
+    """Lab 4 Task 2 failure demonstration. The next commit reverts this."""
+    assert False, "Deliberate failure for the Lab 4 Task 2 demonstration"
