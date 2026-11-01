@@ -1,0 +1,69 @@
+{
+    "ModelPackageSummaryList": [
+        {
+            "ModelPackageGroupName": "northstar-churn-models",
+            "ModelPackageVersion": 7,
+            "ModelPackageArn": "arn:aws:sagemaker:us-east-1:493155413162:model-package/northstar-churn-models/7",
+            "CreationTime": "2026-10-31T23:10:25.964000-06:00",
+            "ModelPackageStatus": "Completed",
+            "ModelApprovalStatus": "PendingManualApproval",
+            "ModelPackageRegistrationType": "Registered"
+        },
+        {
+            "ModelPackageGroupName": "northstar-churn-models",
+            "ModelPackageVersion": 6,
+            "ModelPackageArn": "arn:aws:sagemaker:us-east-1:493155413162:model-package/northstar-churn-models/6",
+            "CreationTime": "2026-10-31T18:22:17.107000-06:00",
+            "ModelPackageStatus": "Completed",
+            "ModelApprovalStatus": "PendingManualApproval",
+            "ModelPackageRegistrationType": "Registered"
+        },
+        {
+            "ModelPackageGroupName": "northstar-churn-models",
+            "ModelPackageVersion": 5,
+            "ModelPackageArn": "arn:aws:sagemaker:us-east-1:493155413162:model-package/northstar-churn-models/5",
+            "CreationTime": "2026-10-31T18:00:47.115000-06:00",
+            "ModelPackageStatus": "Completed",
+            "ModelApprovalStatus": "Approved",
+            "ModelPackageRegistrationType": "Registered"
+        },
+        {
+            "ModelPackageGroupName": "northstar-churn-models",
+            "ModelPackageVersion": 4,
+            "ModelPackageArn": "arn:aws:sagemaker:us-east-1:493155413162:model-package/northstar-churn-models/4",
+            "CreationTime": "2026-10-31T17:21:09.957000-06:00",
+            "ModelPackageStatus": "Completed",
+            "ModelApprovalStatus": "Rejected",
+            "ModelPackageRegistrationType": "Registered"
+        },
+        {
+            "ModelPackageGroupName": "northstar-churn-models",
+            "ModelPackageVersion": 3,
+            "ModelPackageArn": "arn:aws:sagemaker:us-east-1:493155413162:model-package/northstar-churn-models/3",
+            "CreationTime": "2026-10-31T16:44:19.851000-06:00",
+            "ModelPackageStatus": "Completed",
+            "ModelApprovalStatus": "PendingManualApproval",
+            "ModelPackageRegistrationType": "Registered"
+        },
+        {
+            "ModelPackageGroupName": "northstar-churn-models",
+            "ModelPackageVersion": 2,
+            "ModelPackageArn": "arn:aws:sagemaker:us-east-1:493155413162:model-package/northstar-churn-models/2",
+            "ModelPackageDescription": "Churn model xgb-d6-eta0.03-r600-final trained 2026-10-18 on XGBoost 3.4.1: AUC 0.7857, P@10% 0.73, R@10% 0.3318, lift CI [0.0441, 0.0824]",
+            "CreationTime": "2026-10-17T18:11:09.888000-06:00",
+            "ModelPackageStatus": "Completed",
+            "ModelApprovalStatus": "PendingManualApproval",
+            "ModelPackageRegistrationType": "Registered"
+        },
+        {
+            "ModelPackageGroupName": "northstar-churn-models",
+            "ModelPackageVersion": 1,
+            "ModelPackageArn": "arn:aws:sagemaker:us-east-1:493155413162:model-package/northstar-churn-models/1",
+            "ModelPackageDescription": "Churn model xgb-d6-eta0.03-r600-regtest trained 2026-10-18 on XGBoost 3.4.1: AUC 0.7857, P@10% 0.73, R@10% 0.3318, lift CI [0.0441, 0.0824]",
+            "CreationTime": "2026-10-17T18:03:50.857000-06:00",
+            "ModelPackageStatus": "Completed",
+            "ModelApprovalStatus": "PendingManualApproval",
+            "ModelPackageRegistrationType": "Registered"
+        }
+    ]
+}
