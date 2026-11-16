@@ -106,6 +106,16 @@ data "aws_iam_policy_document" "ml_engineer" {
     resources = ["${local.bucket_arn}/artifacts/*", "${local.bucket_arn}/features/*"]
   }
 
+  # Lab 5 prerequisite 5: the endpoint writes DataCaptureConfig output as its
+  # execution role (this one). Without this statement capture fails silently:
+  # the endpoint is InService, EnableCapture is true, and nothing is written.
+  statement {
+    sid       = "S3DataCaptureWrite"
+    effect    = "Allow"
+    actions   = ["s3:PutObject", "s3:AbortMultipartUpload"]
+    resources = ["${local.bucket_arn}/datacapture/*"]
+  }
+
   statement {
     sid       = "S3BucketList"
     effect    = "Allow"

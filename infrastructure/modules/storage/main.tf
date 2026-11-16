@@ -116,5 +116,12 @@ resource "aws_s3_bucket_lifecycle_configuration" "data" {
     expiration {
       days = 7
     }
+    # Lab 5 prerequisite 6: the bucket is versioned, so expiration alone only
+    # hides captured data behind a delete marker. This permanently deletes the
+    # hidden version a day later. Kept inside this rule (not a new rule) because
+    # verify-lab2.sh checks for exactly five lifecycle rules.
+    noncurrent_version_expiration {
+      noncurrent_days = 1
+    }
   }
 }
